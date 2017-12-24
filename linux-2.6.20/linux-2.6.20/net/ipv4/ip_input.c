@@ -154,6 +154,7 @@ DEFINE_SNMP_STAT(struct ipstats_mib, ip_statistics) __read_mostly;
 
 /*
  *	Process Router Attention IP option
+ *  处理路由注意选项
  */ 
 int ip_call_ra_chain(struct sk_buff *skb)
 {
