@@ -100,7 +100,7 @@ static void raw_v4_unhash(struct sock *sk)
 		sock_prot_dec_use(sk->sk_prot);
 	write_unlock_bh(&raw_v4_lock);
 }
-
+/* 原始套接字根据四层进行查找对应的描述控制块 */
 struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
 			     __be32 raddr, __be32 laddr,
 			     int dif)
@@ -110,7 +110,7 @@ struct sock *__raw_v4_lookup(struct sock *sk, unsigned short num,
 	sk_for_each_from(sk, node) {
 		struct inet_sock *inet = inet_sk(sk);
 
-		if (inet->num == num 					&&
+		if (inet->num == num 	/* 四层协议类型必须一样 */				&&
 		    !(inet->daddr && inet->daddr != raddr) 		&&
 		    !(inet->rcv_saddr && inet->rcv_saddr != laddr)	&&
 		    !(sk->sk_bound_dev_if && sk->sk_bound_dev_if != dif))
@@ -148,6 +148,7 @@ static __inline__ int icmp_filter(struct sock *sk, struct sk_buff *skb)
  *
  * RFC 1122: SHOULD pass TOS value up to the transport layer.
  * -> It does. And not only TOS, but all IP header.
+ * ip输入处理原始套接字
  */
 int raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash)
 {
@@ -155,10 +156,11 @@ int raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash)
 	struct hlist_head *head;
 	int delivered = 0;
 
-	read_lock(&raw_v4_lock);
-	head = &raw_v4_htable[hash];
-	if (hlist_empty(head))
+	read_lock(&raw_v4_lock);/* 遍历整个该协议的hash表 */
+	head = &raw_v4_htable[hash];/* 获取hash表头 */
+	if (hlist_empty(head))/* 如果为空的话，直接退出 */
 		goto out;
+	/* 查找对应套接字的描述控制块，原始套接字可以指定端口，协议，源目的ip地址 */
 	sk = __raw_v4_lookup(__sk_head(head), iph->protocol,
 			     iph->saddr, iph->daddr,
 			     skb->dev->ifindex);
@@ -166,12 +168,16 @@ int raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash)
 	while (sk) {
 		delivered = 1;
 		if (iph->protocol != IPPROTO_ICMP || !icmp_filter(sk, skb)) {
+			/* 复制报文 */
 			struct sk_buff *clone = skb_clone(skb, GFP_ATOMIC);
 
 			/* Not releasing hash table! */
+		    /* 复制成功 */
 			if (clone)
+				/* 交给原始套接字 */
 				raw_rcv(sk, clone);
 		}
+		/* 查找下一个原始套接字 */
 		sk = __raw_v4_lookup(sk_next(sk), iph->protocol,
 				     iph->saddr, iph->daddr,
 				     skb->dev->ifindex);

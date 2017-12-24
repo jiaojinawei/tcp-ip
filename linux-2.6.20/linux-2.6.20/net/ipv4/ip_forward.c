@@ -52,16 +52,16 @@ static inline int ip_forward_finish(struct sk_buff *skb)
 
 	return dst_output(skb);
 }
-
+/* ip转发 */
 int ip_forward(struct sk_buff *skb)
 {
-	struct iphdr *iph;	/* Our header */
-	struct rtable *rt;	/* Route we use */
-	struct ip_options * opt	= &(IPCB(skb)->opt);
+	struct iphdr *iph;	/* Our header ip头*/
+	struct rtable *rt;	/* Route we use ip路由 */
+	struct ip_options * opt	= &(IPCB(skb)->opt);/* 获取ip层私有控制块 */
 
 	if (!xfrm4_policy_check(NULL, XFRM_POLICY_FWD, skb))
 		goto drop;
-
+	/* 如果有路由告警选项的话，调用ip_call_ra_chain处理 */
 	if (IPCB(skb)->opt.router_alert && ip_call_ra_chain(skb))
 		return NET_RX_SUCCESS;
 
@@ -100,7 +100,7 @@ int ip_forward(struct sk_buff *skb)
 	 */
 	if (rt->rt_flags&RTCF_DOREDIRECT && !opt->srr)
 		ip_rt_send_redirect(skb);
-
+	/* 将tos转换成优先级 */
 	skb->priority = rt_tos2priority(iph->tos);
 
 	return NF_HOOK(PF_INET, NF_IP_FORWARD, skb, skb->dev, rt->u.dst.dev,

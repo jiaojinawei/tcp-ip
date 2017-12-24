@@ -125,6 +125,7 @@ static int neigh_forced_gc(struct neigh_table *tbl)
 	NEIGH_CACHE_STAT_INC(tbl, forced_gc_runs);
 
 	write_lock_bh(&tbl->lock);
+	/* 遍历hash桶 */
 	for (i = 0; i <= tbl->hash_mask; i++) {
 		struct neighbour *n, **np;
 
@@ -175,24 +176,26 @@ static void pneigh_queue_purge(struct sk_buff_head *list)
 		kfree_skb(skb);
 	}
 }
-
+/* 清洗设备的邻居表项 */
 static void neigh_flush_dev(struct neigh_table *tbl, struct net_device *dev)
 {
 	int i;
-
+	/* 遍历hash表 */
 	for (i = 0; i <= tbl->hash_mask; i++) {
+		/* 获取链表头 */
 		struct neighbour *n, **np = &tbl->hash_buckets[i];
-
+		/* 遍历链表的每一个成员 */
 		while ((n = *np) != NULL) {
 			if (dev && n->dev != dev) {
 				np = &n->next;
 				continue;
 			}
+			/* 只处理该设备的表项 */
 			*np = n->next;
 			write_lock(&n->lock);
-			neigh_del_timer(n);
-			n->dead = 1;
-
+			neigh_del_timer(n);/* 删除定时器 */
+			n->dead = 1;/* 设置删除标志 */
+			/* 判断引用计数是否为0 */
 			if (atomic_read(&n->refcnt) != 1) {
 				/* The most unpleasant situation.
 				   We must destroy neighbour entry,
@@ -202,17 +205,18 @@ static void neigh_flush_dev(struct neigh_table *tbl, struct net_device *dev)
 				   the last user releases us, but
 				   we must kill timers etc. and move
 				   it to safe state.
+				   * 引用计数如果不为0
 				 */
-				skb_queue_purge(&n->arp_queue);
-				n->output = neigh_blackhole;
+				skb_queue_purge(&n->arp_queue);/* 删除所有的待发送报文 */
+				n->output = neigh_blackhole;/* 设置其输出函数为黑洞 */
 				if (n->nud_state & NUD_VALID)
-					n->nud_state = NUD_NOARP;
+					n->nud_state = NUD_NOARP;/* 改变其状态为不需要arp */
 				else
 					n->nud_state = NUD_NONE;
 				NEIGH_PRINTK2("neigh %p is stray.\n", n);
 			}
 			write_unlock(&n->lock);
-			neigh_release(n);
+			neigh_release(n);/* 释放邻居表项 */
 		}
 	}
 }
@@ -224,25 +228,28 @@ void neigh_changeaddr(struct neigh_table *tbl, struct net_device *dev)
 	write_unlock_bh(&tbl->lock);
 }
 
+/* 响应接口掉电函数 */
 int neigh_ifdown(struct neigh_table *tbl, struct net_device *dev)
 {
 	write_lock_bh(&tbl->lock);
 	neigh_flush_dev(tbl, dev);
 	pneigh_ifdown(tbl, dev);
 	write_unlock_bh(&tbl->lock);
-
+	/* 删除代理定时器 */
 	del_timer_sync(&tbl->proxy_timer);
+	/* 清理代理报文队列 */
 	pneigh_queue_purge(&tbl->proxy_queue);
 	return 0;
 }
-
+/* 分配一个表项 */
 static struct neighbour *neigh_alloc(struct neigh_table *tbl)
 {
 	struct neighbour *n = NULL;
 	unsigned long now = jiffies;
 	int entries;
 
-	entries = atomic_inc_return(&tbl->entries) - 1;
+	entries = atomic_inc_return(&tbl->entries) - 1;/* 获取已经存在的表项个数，并且增加当前的个数统计 */
+	/* 当表项大于最高阈值时，进行强制回收，或者大于2级阈值且超过了5秒 */
 	if (entries >= tbl->gc_thresh3 ||
 	    (entries >= tbl->gc_thresh2 &&
 	     time_after(now, tbl->last_flush + 5 * HZ))) {
@@ -250,26 +257,32 @@ static struct neighbour *neigh_alloc(struct neigh_table *tbl)
 		    entries >= tbl->gc_thresh3)
 			goto out_entries;
 	}
-
+	/* 分配一个表项 */
 	n = kmem_cache_alloc(tbl->kmem_cachep, GFP_ATOMIC);
 	if (!n)
 		goto out_entries;
-
+	/* 清零 */
 	memset(n, 0, tbl->entry_size);
-
+	/* 初始化报文发送队列 */
 	skb_queue_head_init(&n->arp_queue);
+	/* 初始化读写锁 */
 	rwlock_init(&n->lock);
+	/* 更新时间 */
 	n->updated	  = n->used = now;
 	n->nud_state	  = NUD_NONE;
+	/* 此时的输出函数为黑洞，即删除 */
 	n->output	  = neigh_blackhole;
+	/* 指向表的参数 */
 	n->parms	  = neigh_parms_clone(&tbl->parms);
 	init_timer(&n->timer);
+	/* 初始化定时器处理函数 */
 	n->timer.function = neigh_timer_handler;
 	n->timer.data	  = (unsigned long)n;
 
 	NEIGH_CACHE_STAT_INC(tbl, allocs);
 	n->tbl		  = tbl;
 	atomic_set(&n->refcnt, 1);
+	/* 设置其为等待删除标志 */
 	n->dead		  = 1;
 out:
 	return n;
@@ -302,7 +315,7 @@ static void neigh_hash_free(struct neighbour **hash, unsigned int entries)
 	else
 		free_pages((unsigned long)hash, get_order(size));
 }
-
+/* hash桶进行扩容 */
 static void neigh_hash_grow(struct neigh_table *tbl, unsigned long new_entries)
 {
 	struct neighbour **new_hash, **old_hash;
@@ -311,21 +324,24 @@ static void neigh_hash_grow(struct neigh_table *tbl, unsigned long new_entries)
 	NEIGH_CACHE_STAT_INC(tbl, hash_grows);
 
 	BUG_ON(new_entries & (new_entries - 1));
+	/* 分配新的hash桶个数 */
 	new_hash = neigh_hash_alloc(new_entries);
 	if (!new_hash)
 		return;
-
+	/* 原来的个数，需要进行拷贝 */
 	old_entries = tbl->hash_mask + 1;
 	new_hash_mask = new_entries - 1;
 	old_hash = tbl->hash_buckets;
 
 	get_random_bytes(&tbl->hash_rnd, sizeof(tbl->hash_rnd));
+	/* 遍历老的hash表项 */
 	for (i = 0; i < old_entries; i++) {
 		struct neighbour *n, *next;
 
 		for (n = old_hash[i]; n; n = next) {
+			/* 根据三层地址进行hash */
 			unsigned int hash_val = tbl->hash(n->primary_key, n->dev);
-
+			/* 获取新的hash值，挂入hash表 */
 			hash_val &= new_hash_mask;
 			next = n->next;
 
@@ -335,7 +351,7 @@ static void neigh_hash_grow(struct neigh_table *tbl, unsigned long new_entries)
 	}
 	tbl->hash_buckets = new_hash;
 	tbl->hash_mask = new_hash_mask;
-
+	/* 释放老的hash表 */
 	neigh_hash_free(old_hash, old_entries);
 }
 
@@ -379,25 +395,25 @@ struct neighbour *neigh_lookup_nodev(struct neigh_table *tbl, const void *pkey)
 	read_unlock_bh(&tbl->lock);
 	return n;
 }
-
+/* 创建邻居表项 */
 struct neighbour *neigh_create(struct neigh_table *tbl, const void *pkey,
 			       struct net_device *dev)
 {
 	u32 hash_val;
-	int key_len = tbl->key_len;
+	int key_len = tbl->key_len;/* 获取key长度 */
 	int error;
-	struct neighbour *n1, *rc, *n = neigh_alloc(tbl);
+	struct neighbour *n1, *rc, *n = neigh_alloc(tbl);/* 分配一个表项 */
 
 	if (!n) {
 		rc = ERR_PTR(-ENOBUFS);
 		goto out;
 	}
-
+	/* 将三层地址拷贝到数组中 */
 	memcpy(n->primary_key, pkey, key_len);
-	n->dev = dev;
+	n->dev = dev;/* 表项所属设备 */
 	dev_hold(dev);
 
-	/* Protocol specific setup. */
+	/* Protocol specific setup. 调用构建函数进行构建 */
 	if (tbl->constructor &&	(error = tbl->constructor(n)) < 0) {
 		rc = ERR_PTR(error);
 		goto out_neigh_release;
@@ -409,12 +425,14 @@ struct neighbour *neigh_create(struct neigh_table *tbl, const void *pkey,
 		rc = ERR_PTR(error);
 		goto out_neigh_release;
 	}
-
+	/* 设置表项的确认超时时间 */
 	n->confirmed = jiffies - (n->parms->base_reachable_time << 1);
 
-	write_lock_bh(&tbl->lock);
+	write_lock_bh(&tbl->lock);/* 获取表锁 */
 
+	/* 表项数大于hash桶数，则进行扩充，采用的是一个桶保存一个表 */
 	if (atomic_read(&tbl->entries) > (tbl->hash_mask + 1))
+		/* hash桶扩大一倍 */
 		neigh_hash_grow(tbl, (tbl->hash_mask + 1) << 1);
 
 	hash_val = tbl->hash(pkey, dev) & tbl->hash_mask;
@@ -423,19 +441,20 @@ struct neighbour *neigh_create(struct neigh_table *tbl, const void *pkey,
 		rc = ERR_PTR(-EINVAL);
 		goto out_tbl_unlock;
 	}
-
+	/* 遍历该hash表下的所有表项 */
 	for (n1 = tbl->hash_buckets[hash_val]; n1; n1 = n1->next) {
+		/* 查找设备相同，并且目的三层第一也相同的 */
 		if (dev == n1->dev && !memcmp(n1->primary_key, pkey, key_len)) {
-			neigh_hold(n1);
+			neigh_hold(n1);/* 增加其引用计数即可 */
 			rc = n1;
 			goto out_tbl_unlock;
 		}
 	}
-
+	/* 将新的表项插入头部 */
 	n->next = tbl->hash_buckets[hash_val];
 	tbl->hash_buckets[hash_val] = n;
-	n->dead = 0;
-	neigh_hold(n);
+	n->dead = 0;/* 设置非删除标志 */
+	neigh_hold(n);/* 增加引用计数 */
 	write_unlock_bh(&tbl->lock);
 	NEIGH_PRINTK2("neigh %p is created.\n", n);
 	rc = n;
@@ -603,6 +622,7 @@ void neigh_destroy(struct neighbour *neigh)
    disable fast path.
 
    Called with write_locked neigh.
+   邻居状态是可疑的，进行可疑处理
  */
 static void neigh_suspect(struct neighbour *neigh)
 {
@@ -632,19 +652,20 @@ static void neigh_connect(struct neighbour *neigh)
 	for (hh = neigh->hh; hh; hh = hh->hh_next)
 		hh->hh_output = neigh->ops->hh_output;
 }
-
+/* 邻居定时器周期处理函数，一般是1秒，可以通过改代码改变 */
 static void neigh_periodic_timer(unsigned long arg)
 {
-	struct neigh_table *tbl = (struct neigh_table *)arg;
+	struct neigh_table *tbl = (struct neigh_table *)arg;/* 强制类型转换获得邻居表描述控制块 */
 	struct neighbour *n, **np;
-	unsigned long expire, now = jiffies;
+	unsigned long expire, now = jiffies;/* 获取当前时间 */
 
-	NEIGH_CACHE_STAT_INC(tbl, periodic_gc_runs);
+	NEIGH_CACHE_STAT_INC(tbl, periodic_gc_runs);/* 统计邻居表运行次数 */
 
-	write_lock(&tbl->lock);
+	write_lock(&tbl->lock);/* 获取邻居表写锁 */
 
 	/*
 	 *	periodically recompute ReachableTime from random function
+	 * 周期性重新计算到达时间，是一个随机值
 	 */
 
 	if (time_after(now, tbl->last_rand + 300 * HZ)) {
@@ -654,21 +675,23 @@ static void neigh_periodic_timer(unsigned long arg)
 			p->reachable_time =
 				neigh_rand_reach_time(p->base_reachable_time);
 	}
-
+	/* 获取本次回收的桶 */
 	np = &tbl->hash_buckets[tbl->hash_chain_gc];
+	/* 下次回收的桶 */
 	tbl->hash_chain_gc = ((tbl->hash_chain_gc + 1) & tbl->hash_mask);
-
+	/* 遍历hash链表 */
 	while ((n = *np) != NULL) {
 		unsigned int state;
 
-		write_lock(&n->lock);
+		write_lock(&n->lock);/* 获取邻居表项写锁 */
 
-		state = n->nud_state;
+		state = n->nud_state;/* 获取其状态 */
+		/* 如果该表项是永久有效的，即用户已经配置了硬件地址，或者存在定时器 */
 		if (state & (NUD_PERMANENT | NUD_IN_TIMER)) {
-			write_unlock(&n->lock);
+			write_unlock(&n->lock);/* 不处理这类邻居表项 */
 			goto next_elt;
 		}
-
+		/*  */
 		if (time_before(n->used, n->confirmed))
 			n->used = n->confirmed;
 
@@ -678,6 +701,7 @@ static void neigh_periodic_timer(unsigned long arg)
 			*np = n->next;
 			n->dead = 1;
 			write_unlock(&n->lock);
+			/* 释放该邻居表项 */
 			neigh_release(n);
 			continue;
 		}
@@ -719,40 +743,43 @@ static inline void neigh_add_timer(struct neighbour *n, unsigned long when)
 }
 
 /* Called when a timer expires for a neighbour entry. */
-
+/* 邻居表项定时器超时处理函数 */
 static void neigh_timer_handler(unsigned long arg)
 {
 	unsigned long now, next;
-	struct neighbour *neigh = (struct neighbour *)arg;
+	struct neighbour *neigh = (struct neighbour *)arg;/* 获取邻居表项的控制块 */
 	unsigned state;
 	int notify = 0;
 
-	write_lock(&neigh->lock);
+	write_lock(&neigh->lock);/* 获取写锁 */
 
-	state = neigh->nud_state;
-	now = jiffies;
-	next = now + HZ;
+	state = neigh->nud_state;/* 获取该表项的状态 */
+	now = jiffies;/* 获取当前时间 */
+	next = now + HZ;/* 下次超时时间为1秒 */
 
-	if (!(state & NUD_IN_TIMER)) {
+	if (!(state & NUD_IN_TIMER)) {/* 不存在定时器，则说明有问题 */
 #ifndef CONFIG_SMP
 		printk(KERN_WARNING "neigh: timer & !nud_in_timer\n");
 #endif
 		goto out;
 	}
 
+	/* 如果是已经得到并且可以使用的非静态表项 */
 	if (state & NUD_REACHABLE) {
 		if (time_before_eq(now, 
 				   neigh->confirmed + neigh->parms->reachable_time)) {
 			NEIGH_PRINTK2("neigh %p is still alive.\n", neigh);
 			next = neigh->confirmed + neigh->parms->reachable_time;
+			/* 确认时间未超时，不改变状态，定时器改为下一次确认时间超时时间 */
 		} else if (time_before_eq(now,
 					  neigh->used + neigh->parms->delay_probe_time)) {
+					  /* 确认时间超时，但是闲置时间未超时，改变状态为NUD_DELAY */
 			NEIGH_PRINTK2("neigh %p is delayed.\n", neigh);
-			neigh->nud_state = NUD_DELAY;
-			neigh->updated = jiffies;
-			neigh_suspect(neigh);
+			neigh->nud_state = NUD_DELAY;/* 状态改变 */
+			neigh->updated = jiffies;/* 记录状态改变时间 */
+			neigh_suspect(neigh);/* 时间改为下次闲置时间 */
 			next = now + neigh->parms->delay_probe_time;
-		} else {
+		} else {/* 都超时的话，直接改为NUD_STALE */
 			NEIGH_PRINTK2("neigh %p is suspected.\n", neigh);
 			neigh->nud_state = NUD_STALE;
 			neigh->updated = jiffies;
@@ -762,13 +789,17 @@ static void neigh_timer_handler(unsigned long arg)
 	} else if (state & NUD_DELAY) {
 		if (time_before_eq(now, 
 				   neigh->confirmed + neigh->parms->delay_probe_time)) {
+				   /* 延迟状态，但是却没有超时确认时间 */
 			NEIGH_PRINTK2("neigh %p is now reachable.\n", neigh);
 			neigh->nud_state = NUD_REACHABLE;
 			neigh->updated = jiffies;
+			/* 可达状态选用连接发送函数 */
 			neigh_connect(neigh);
 			notify = 1;
+			/* 等待确认超时 */
 			next = neigh->confirmed + neigh->parms->reachable_time;
 		} else {
+			/* 确认时间超时，设置探测超时时间 */
 			NEIGH_PRINTK2("neigh %p is probed.\n", neigh);
 			neigh->nud_state = NUD_PROBE;
 			neigh->updated = jiffies;
@@ -776,14 +807,15 @@ static void neigh_timer_handler(unsigned long arg)
 			next = now + neigh->parms->retrans_time;
 		}
 	} else {
-		/* NUD_PROBE|NUD_INCOMPLETE */
+		/* NUD_PROBE|NUD_INCOMPLETE 这两个状态继续发送*/
 		next = now + neigh->parms->retrans_time;
 	}
 
+	/* 判断是否发送超过上限 */
 	if ((neigh->nud_state & (NUD_INCOMPLETE | NUD_PROBE)) &&
 	    atomic_read(&neigh->probes) >= neigh_max_probes(neigh)) {
 		struct sk_buff *skb;
-
+		/* 状态改为failed */
 		neigh->nud_state = NUD_FAILED;
 		neigh->updated = jiffies;
 		notify = 1;
@@ -794,20 +826,23 @@ static void neigh_timer_handler(unsigned long arg)
 		   routine. Particularly, it can hit the same neighbour entry!
 
 		   So that, we try to be accurate and avoid dead loop. --ANK
+		 * 邻居表项失效后
 		 */
 		while (neigh->nud_state == NUD_FAILED &&
 		       (skb = __skb_dequeue(&neigh->arp_queue)) != NULL) {
 			write_unlock(&neigh->lock);
+			/* 向三层发送错误报文，对于arp来说发送icmp不可达错误报文 */
 			neigh->ops->error_report(neigh, skb);
 			write_lock(&neigh->lock);
 		}
 		skb_queue_purge(&neigh->arp_queue);
 	}
-
+	/* 更新定时器 */
 	if (neigh->nud_state & NUD_IN_TIMER) {
 		if (time_before(next, jiffies + HZ/2))
 			next = jiffies + HZ/2;
 		if (!mod_timer(&neigh->timer, next))
+			/* 成功，增加引用计数 */
 			neigh_hold(neigh);
 	}
 	if (neigh->nud_state & (NUD_INCOMPLETE | NUD_PROBE)) {
@@ -824,6 +859,7 @@ static void neigh_timer_handler(unsigned long arg)
 out:
 		write_unlock(&neigh->lock);
 	}
+	/* 状态改变发送通知 */
 	if (notify)
 		call_netevent_notifiers(NETEVENT_NEIGH_UPDATE, neigh);
 
@@ -831,9 +867,10 @@ out:
 	if (notify && neigh->parms->app_probes)
 		neigh_app_notify(neigh);
 #endif
+	/* 释放失败态的表项 */
 	neigh_release(neigh);
 }
-
+/* 用于检测邻居表是否有效 */
 int __neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 {
 	int rc;
@@ -842,6 +879,7 @@ int __neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 	write_lock_bh(&neigh->lock);
 
 	rc = 0;
+	/* 这几个状态可以直接发送 */
 	if (neigh->nud_state & (NUD_CONNECTED | NUD_DELAY | NUD_PROBE))
 		goto out_unlock_bh;
 
@@ -863,7 +901,7 @@ int __neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 				kfree_skb(skb);
 			return 1;
 		}
-	} else if (neigh->nud_state & NUD_STALE) {
+	} else if (neigh->nud_state & NUD_STALE) {/* 这种情况下，发送报文后进入delay状态 */
 		NEIGH_PRINTK2("neigh %p is delayed.\n", neigh);
 		neigh_hold(neigh);
 		neigh->nud_state = NUD_DELAY;
@@ -874,6 +912,7 @@ int __neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 
 	if (neigh->nud_state == NUD_INCOMPLETE) {
 		if (skb) {
+			/* 队列满了，直接删除 */
 			if (skb_queue_len(&neigh->arp_queue) >=
 			    neigh->parms->queue_len) {
 				struct sk_buff *buff;
@@ -881,6 +920,7 @@ int __neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 				__skb_unlink(buff, &neigh->arp_queue);
 				kfree_skb(buff);
 			}
+			/* 还没有收到回应的话，加入到队尾部 */
 			__skb_queue_tail(&neigh->arp_queue, skb);
 		}
 		rc = 1;
@@ -939,19 +979,20 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 
 	write_lock_bh(&neigh->lock);
 
-	dev    = neigh->dev;
-	old    = neigh->nud_state;
+	dev    = neigh->dev;/* 获取表项对应的设备 */
+	old    = neigh->nud_state;/* 获取表项状态 */
 	err    = -EPERM;
-
+	/* 如果表项是NUD_NOARP|NUD_PERMANENT,则必须设置了管理标志 */
 	if (!(flags & NEIGH_UPDATE_F_ADMIN) && 
 	    (old & (NUD_NOARP | NUD_PERMANENT)))
 		goto out;
-
+	/* 如果需要设置的标志是不有效表项 */
 	if (!(new & NUD_VALID)) {
+		/* 删除定时器 */
 		neigh_del_timer(neigh);
 		if (old & NUD_CONNECTED)
-			neigh_suspect(neigh);
-		neigh->nud_state = new;
+			neigh_suspect(neigh);/* 改变输出函数为out_put */
+		neigh->nud_state = new;/* 设置新的状态 */
 		err = 0;
 		notify = old & NUD_VALID;
 		goto out;
@@ -980,6 +1021,7 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 		lladdr = neigh->ha;
 	}
 
+	/* 如果新的状态是链接的，则更确认时间为当前时间 */
 	if (new & NUD_CONNECTED)
 		neigh->confirmed = jiffies;
 	neigh->updated = jiffies;
@@ -1008,17 +1050,17 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 	}
 
 	if (new != old) {
-		neigh_del_timer(neigh);
+		neigh_del_timer(neigh);/* 删除老的定时器 */
 		if (new & NUD_IN_TIMER) {
-			neigh_hold(neigh);
+			neigh_hold(neigh);/* 增加引用计数 */
 			neigh_add_timer(neigh, (jiffies + 
 						((new & NUD_REACHABLE) ? 
 						 neigh->parms->reachable_time :
-						 0)));
+						 0)));/* 更新定时器 */
 		}
 		neigh->nud_state = new;
 	}
-
+	/* 更新设备的硬件地址 */
 	if (lladdr != neigh->ha) {
 		memcpy(&neigh->ha, lladdr, dev->addr_len);
 		neigh_update_hhs(neigh);
@@ -1078,7 +1120,7 @@ struct neighbour *neigh_event_ns(struct neigh_table *tbl,
 			     NEIGH_UPDATE_F_OVERRIDE);
 	return neigh;
 }
-
+/* 建立二层首部缓存 */
 static void neigh_hh_init(struct neighbour *n, struct dst_entry *dst,
 			  __be16 protocol)
 {
@@ -1134,25 +1176,27 @@ int neigh_compat_output(struct sk_buff *skb)
 }
 
 /* Slow and careful. */
-
+/* 慢速发送函数 */
 int neigh_resolve_output(struct sk_buff *skb)
 {
 	struct dst_entry *dst = skb->dst;
 	struct neighbour *neigh;
 	int rc = 0;
-
+	/* 目的路由为空，或者路由的邻居表项为空，直接丢弃 */
 	if (!dst || !(neigh = dst->neighbour))
 		goto discard;
-
+	/* 报文的长度偏移掉二层头部 */
 	__skb_pull(skb, skb->nh.raw - skb->data);
 
 	if (!neigh_event_send(neigh, skb)) {
 		int err;
 		struct net_device *dev = neigh->dev;
+		/* 如果设备支持hard_header_cache，并且其路由缓存中的二层缓存为空，则为其建立二层首部缓存 */
 		if (dev->hard_header_cache && !dst->hh) {
 			write_lock_bh(&neigh->lock);
-			if (!dst->hh)
+			if (!dst->hh)/* 建立二层首部缓存 */
 				neigh_hh_init(neigh, dst, dst->ops->protocol);
+			/* 在报文中添加二层首部 */
 			err = dev->hard_header(skb, dev, ntohs(skb->protocol),
 					       neigh->ha, NULL, skb->len);
 			write_unlock_bh(&neigh->lock);
@@ -1162,6 +1206,7 @@ int neigh_resolve_output(struct sk_buff *skb)
 					       neigh->ha, NULL, skb->len);
 			read_unlock_bh(&neigh->lock);
 		}
+		/* 调用输出函数进行输出 */
 		if (err >= 0)
 			rc = neigh->ops->queue_xmit(skb);
 		else
@@ -1201,7 +1246,7 @@ int neigh_connected_output(struct sk_buff *skb)
 	}
 	return err;
 }
-
+/* 代理邻居处理 */
 static void neigh_proxy_process(unsigned long arg)
 {
 	struct neigh_table *tbl = (struct neigh_table *)arg;
@@ -1212,9 +1257,10 @@ static void neigh_proxy_process(unsigned long arg)
 	spin_lock(&tbl->proxy_queue.lock);
 
 	skb = tbl->proxy_queue.next;
-
+	/* 循环处理所有的报文 */
 	while (skb != (struct sk_buff *)&tbl->proxy_queue) {
 		struct sk_buff *back = skb;
+		/* 计算 */
 		long tdif = NEIGH_CB(back)->sched_next - now;
 
 		skb = skb->next;
@@ -1235,18 +1281,19 @@ static void neigh_proxy_process(unsigned long arg)
 		mod_timer(&tbl->proxy_timer, jiffies + sched_next);
 	spin_unlock(&tbl->proxy_queue.lock);
 }
-
+/* 代理邻居报文入队列 */
 void pneigh_enqueue(struct neigh_table *tbl, struct neigh_parms *p,
 		    struct sk_buff *skb)
 {
 	unsigned long now = jiffies;
 	unsigned long sched_next = now + (net_random() % p->proxy_delay);
 
+	/* 请求个数大于允许的个数，立即删除 */
 	if (tbl->proxy_queue.qlen > p->proxy_qlen) {
 		kfree_skb(skb);
 		return;
 	}
-
+	/* 设置其下一次调度时间 */
 	NEIGH_CB(skb)->sched_next = sched_next;
 	NEIGH_CB(skb)->flags |= LOCALLY_ENQUEUED;
 
@@ -1332,17 +1379,19 @@ void neigh_table_init_no_netlink(struct neigh_table *tbl)
 {
 	unsigned long now = jiffies;
 	unsigned long phsize;
-
+	/* 设置该邻居表的引用计数为1 */
 	atomic_set(&tbl->parms.refcnt, 1);
+	/* 初始化邻居表的rcu，采用的是rcu进行保护 */
 	INIT_RCU_HEAD(&tbl->parms.rcu_head);
 	tbl->parms.reachable_time =
 			  neigh_rand_reach_time(tbl->parms.base_reachable_time);
-
+	/* 构建邻居表项cache */
 	if (!tbl->kmem_cachep)
 		tbl->kmem_cachep =
 			kmem_cache_create(tbl->id, tbl->entry_size, 0,
 					  SLAB_HWCACHE_ALIGN|SLAB_PANIC,
 					  NULL, NULL);
+	/* 分配邻居表的统计信息每cpu结构体 */
 	tbl->stats = alloc_percpu(struct neigh_statistics);
 	if (!tbl->stats)
 		panic("cannot create neighbour cache statistics");
@@ -1354,10 +1403,11 @@ void neigh_table_init_no_netlink(struct neigh_table *tbl)
 	tbl->pde->proc_fops = &neigh_stat_seq_fops;
 	tbl->pde->data = tbl;
 #endif
-
+	/* hash桶的掩码为1，那么总共有1+1两个桶 */
 	tbl->hash_mask = 1;
+    /* 分配邻居表的hash桶 */
 	tbl->hash_buckets = neigh_hash_alloc(tbl->hash_mask + 1);
-
+	/* 分配代理邻居表hash桶 */
 	phsize = (PNEIGH_HASHMASK + 1) * sizeof(struct pneigh_entry *);
 	tbl->phash_buckets = kzalloc(phsize, GFP_KERNEL);
 
@@ -1365,14 +1415,19 @@ void neigh_table_init_no_netlink(struct neigh_table *tbl)
 		panic("cannot allocate neighbour cache hashes");
 
 	get_random_bytes(&tbl->hash_rnd, sizeof(tbl->hash_rnd));
-
+	/* 初始化多写者的读写自旋锁，用于写者之间的互斥 */
 	rwlock_init(&tbl->lock);
+	/* 初始化垃圾回收定时器 */
 	init_timer(&tbl->gc_timer);
+	/* 回收的参数 */
 	tbl->gc_timer.data     = (unsigned long)tbl;
+	/* 回收函数 */
 	tbl->gc_timer.function = neigh_periodic_timer;
+	/* 超时时间为1秒 */
 	tbl->gc_timer.expires  = now + 1;
+	/* 启动定时器 */
 	add_timer(&tbl->gc_timer);
-
+	/* 初始化代理定时器 */
 	init_timer(&tbl->proxy_timer);
 	tbl->proxy_timer.data	  = (unsigned long)tbl;
 	tbl->proxy_timer.function = neigh_proxy_process;
@@ -1381,19 +1436,24 @@ void neigh_table_init_no_netlink(struct neigh_table *tbl)
 	tbl->last_flush = now;
 	tbl->last_rand	= now + tbl->parms.reachable_time * 20;
 }
-
+/* 邻居表初始化 */
 void neigh_table_init(struct neigh_table *tbl)
 {
 	struct neigh_table *tmp;
-
+	/* 邻居表初始化 */
 	neigh_table_init_no_netlink(tbl);
+	/* 获取全局邻居表写锁 */
 	write_lock(&neigh_tbl_lock);
+	/* 遍历邻居表链表 */
 	for (tmp = neigh_tables; tmp; tmp = tmp->next) {
+		/* 判断同一协议族的邻居表是否已经存在,仅仅是做告警使用 */
 		if (tmp->family == tbl->family)
 			break;
 	}
+	/* 将邻居表插在开头 */
 	tbl->next	= neigh_tables;
 	neigh_tables	= tbl;
+	/* 替换新的链表头 */
 	write_unlock(&neigh_tbl_lock);
 
 	if (unlikely(tmp)) {
@@ -1500,6 +1560,7 @@ out:
 	return err;
 }
 
+/* 添加邻居表项函数 */
 int neigh_add(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg)
 {
 	struct ndmsg *ndm;
@@ -1507,7 +1568,7 @@ int neigh_add(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg)
 	struct neigh_table *tbl;
 	struct net_device *dev = NULL;
 	int err;
-
+	/* 解析邻居表项的netlink消息 */
 	err = nlmsg_parse(nlh, sizeof(*ndm), tb, NDA_MAX, NULL);
 	if (err < 0)
 		goto out;
@@ -1517,33 +1578,39 @@ int neigh_add(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg)
 		goto out;
 
 	ndm = nlmsg_data(nlh);
+	/* 获取设备索引 */
 	if (ndm->ndm_ifindex) {
+		/* 根据设备索引获取设备描述控制块 */
 		dev = dev_get_by_index(ndm->ndm_ifindex);
 		if (dev == NULL) {
 			err = -ENODEV;
 			goto out;
 		}
-
+		/* 获取硬件地址 */
 		if (tb[NDA_LLADDR] && nla_len(tb[NDA_LLADDR]) < dev->addr_len)
 			goto out_dev_put;
 	}
 
 	read_lock(&neigh_tbl_lock);
+	/* 查找邻居表 */
 	for (tbl = neigh_tables; tbl; tbl = tbl->next) {
 		int flags = NEIGH_UPDATE_F_ADMIN | NEIGH_UPDATE_F_OVERRIDE;
 		struct neighbour *neigh;
 		void *dst, *lladdr;
-
+		/* 查看家族是否相等 */
 		if (tbl->family != ndm->ndm_family)
 			continue;
 		read_unlock(&neigh_tbl_lock);
-
+		/* 校验三层地址长度 */
 		if (nla_len(tb[NDA_DST]) < tbl->key_len)
 			goto out_dev_put;
+		/* 获取三层地址 */
 		dst = nla_data(tb[NDA_DST]);
+		/* 获取链路层地址 */
 		lladdr = tb[NDA_LLADDR] ? nla_data(tb[NDA_LLADDR]) : NULL;
 
-		if (ndm->ndm_flags & NTF_PROXY) {
+		/* 是否是邻居代理 */
+		if (ndm->ndm_flags & NTF_PROXY) {/* 查找代理 */
 			struct pneigh_entry *pn;
 
 			err = -ENOBUFS;
@@ -1555,16 +1622,16 @@ int neigh_add(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg)
 			goto out_dev_put;
 		}
 
-		if (dev == NULL)
+		if (dev == NULL)/* 不存在指定的设备 */
 			goto out_dev_put;
-
+		/* 查找邻居表项 */
 		neigh = neigh_lookup(tbl, dst, dev);
-		if (neigh == NULL) {
-			if (!(nlh->nlmsg_flags & NLM_F_CREATE)) {
+		if (neigh == NULL) {/* 没找到 */
+			if (!(nlh->nlmsg_flags & NLM_F_CREATE)) {/* 是否是获取 */
 				err = -ENOENT;
 				goto out_dev_put;
 			}
-	
+			/* 创建邻居表项 */
 			neigh = __neigh_lookup_errno(tbl, dst, dev);
 			if (IS_ERR(neigh)) {
 				err = PTR_ERR(neigh);
@@ -1580,7 +1647,7 @@ int neigh_add(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg)
 			if (!(nlh->nlmsg_flags & NLM_F_REPLACE))
 				flags &= ~NEIGH_UPDATE_F_OVERRIDE;
 		}
-
+		/* 更新邻居表项 */
 		err = neigh_update(neigh, lladdr, ndm->ndm_state, flags);
 		neigh_release(neigh);
 		goto out_dev_put;

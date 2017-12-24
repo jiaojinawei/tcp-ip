@@ -196,34 +196,37 @@ int ip_call_ra_chain(struct sk_buff *skb)
 	read_unlock(&ip_ra_lock);
 	return 0;
 }
-
+/* 上送本机的后半部 */
 static inline int ip_local_deliver_finish(struct sk_buff *skb)
 {
-	int ihl = skb->nh.iph->ihl*4;
+	int ihl = skb->nh.iph->ihl*4;/* 获取ip头部长度 */
 
 	__skb_pull(skb, ihl);
 
-        /* Point into the IP datagram, just past the header. */
+    /* Point into the IP datagram, just past the header. */
+	/* 指向三层头部起始地址 */
         skb->h.raw = skb->data;
 
 	rcu_read_lock();
 	{
 		/* Note: See raw.c and net/raw.h, RAWV4_HTABLE_SIZE==MAX_INET_PROTOS */
-		int protocol = skb->nh.iph->protocol;
+		int protocol = skb->nh.iph->protocol;/* 获取传输层协议类型 */
 		int hash;
 		struct sock *raw_sk;
 		struct net_protocol *ipprot;
 
 	resubmit:
 		hash = protocol & (MAX_INET_PROTOS - 1);
+		/* 处理原始套接字 */
 		raw_sk = sk_head(&raw_v4_htable[hash]);
 
 		/* If there maybe a raw socket we must check - if not we
 		 * don't care less
+		 * 判断下这里是否有原始套接字，如果有的话，需要拷贝报文发送
 		 */
 		if (raw_sk && !raw_v4_input(skb, skb->nh.iph, hash))
 			raw_sk = NULL;
-
+		/* 根据协议类型查找对应的协议的处理控制块 */
 		if ((ipprot = rcu_dereference(inet_protos[hash])) != NULL) {
 			int ret;
 
@@ -234,6 +237,7 @@ static inline int ip_local_deliver_finish(struct sk_buff *skb)
 				}
 				nf_reset(skb);
 			}
+			/* 传入上层协议进行处理 */
 			ret = ipprot->handler(skb);
 			if (ret < 0) {
 				protocol = -ret;
@@ -260,11 +264,13 @@ static inline int ip_local_deliver_finish(struct sk_buff *skb)
 
 /*
  * 	Deliver IP Packets to the higher protocol layers.
+ * 发送本机报文上半部处理函数
  */ 
 int ip_local_deliver(struct sk_buff *skb)
 {
 	/*
 	 *	Reassemble IP fragments.
+	 * 处理ip碎片
 	 */
 
 	if (skb->nh.iph->frag_off & htons(IP_MF|IP_OFFSET)) {
@@ -272,11 +278,11 @@ int ip_local_deliver(struct sk_buff *skb)
 		if (!skb)
 			return 0;
 	}
-
+	/* local-in节点处理入口 */
 	return NF_HOOK(PF_INET, NF_IP_LOCAL_IN, skb, skb->dev, NULL,
 		       ip_local_deliver_finish);
 }
-
+/* ip选项处理函数 */
 static inline int ip_rcv_options(struct sk_buff *skb)
 {
 	struct ip_options *opt;
@@ -357,10 +363,10 @@ static inline int ip_rcv_finish(struct sk_buff *skb)
 		st[(idx>>16)&0xFF].i_bytes+=skb->len;
 	}
 #endif
-
+	/* 处理ip选项 */
 	if (iph->ihl > 5 && ip_rcv_options(skb))
 		goto drop;
-
+	/* 根据路由决定报文处理路径 */
 	return dst_input(skb);
 
 drop:
@@ -370,6 +376,7 @@ drop:
 
 /*
  * 	Main IP Receive routine.
+ * ip报文接受处理函数
  */ 
 int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 {
@@ -378,20 +385,21 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 
 	/* When the interface is in promisc. mode, drop all the crap
 	 * that it receives, do not try to analyse it.
+	 * 只处理目的mac是本机的报文
 	 */
 	if (skb->pkt_type == PACKET_OTHERHOST)
 		goto drop;
 
 	IP_INC_STATS_BH(IPSTATS_MIB_INRECEIVES);
-
+	/* 判断该报文是否是共享的 */
 	if ((skb = skb_share_check(skb, GFP_ATOMIC)) == NULL) {
 		IP_INC_STATS_BH(IPSTATS_MIB_INDISCARDS);
 		goto out;
 	}
-
+	/* 判断ip头部是否在第一块区域 */
 	if (!pskb_may_pull(skb, sizeof(struct iphdr)))
 		goto inhdr_error;
-
+	/* 获取ip头部 */
 	iph = skb->nh.iph;
 
 	/*
@@ -404,18 +412,18 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 	 *	3.	Checksums correctly. [Speed optimisation for later, skip loopback checksums]
 	 *	4.	Doesn't have a bogus length
 	 */
-
 	if (iph->ihl < 5 || iph->version != 4)
 		goto inhdr_error;
 
+	/* 获取整个ip的头部长度是否在第一块内存区域 */
 	if (!pskb_may_pull(skb, iph->ihl*4))
 		goto inhdr_error;
 
 	iph = skb->nh.iph;
-
+	/* 执行ip头快速校验 */
 	if (unlikely(ip_fast_csum((u8 *)iph, iph->ihl)))
 		goto inhdr_error;
-
+	/* 获取分片总长度 */
 	len = ntohs(iph->tot_len);
 	if (skb->len < len || len < (iph->ihl*4))
 		goto inhdr_error;

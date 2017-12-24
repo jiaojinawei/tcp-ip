@@ -5,20 +5,20 @@
 
 struct ndmsg
 {
-	__u8		ndm_family;
+	__u8		ndm_family;/* 协议家族 */
 	__u8		ndm_pad1;
 	__u16		ndm_pad2;
-	__s32		ndm_ifindex;
-	__u16		ndm_state;
-	__u8		ndm_flags;
-	__u8		ndm_type;
+	__s32		ndm_ifindex;/* 邻居表项所属设备 */
+	__u16		ndm_state;/* 邻居表项状态 */
+	__u8		ndm_flags;/* 标志，比如NTF_PROXY表示操作一个代理项 */
+	__u8		ndm_type;/* 邻居表项地址类型 */
 };
 
 enum
 {
 	NDA_UNSPEC,
-	NDA_DST,
-	NDA_LLADDR,
+	NDA_DST,/* 目的三层地址 */
+	NDA_LLADDR,/* 链路层地址 */
 	NDA_CACHEINFO,
 	NDA_PROBES,
 	__NDA_MAX
@@ -37,17 +37,17 @@ enum
  *	Neighbor Cache Entry States.
  */
 
-#define NUD_INCOMPLETE	0x01
-#define NUD_REACHABLE	0x02
-#define NUD_STALE	0x04
-#define NUD_DELAY	0x08
+#define NUD_INCOMPLETE	0x01/* 发送了邻居请求，但未收到应答的状态 */
+#define NUD_REACHABLE	0x02/* 已经得到并缓存了邻居的硬件地址        */
+#define NUD_STALE	0x04/* 过期状态，在该状态可以继续发送报文，一旦发送报文后，进入NUD_DELAY，如果在该状态的时间超时，则会删除该表项 */
+#define NUD_DELAY	0x08/* 报文已经发送，需要邻居发送可达性应答 */
 #define NUD_PROBE	0x10
 #define NUD_FAILED	0x20
 
 /* Dummy states */
 #define NUD_NOARP	0x40
-#define NUD_PERMANENT	0x80
-#define NUD_NONE	0x00
+#define NUD_PERMANENT	0x80/* 用户配置了硬件地址的永久邻居表项 */
+#define NUD_NONE	0x00/* 邻居表刚创建时处于的状态 */
 
 /* NUD_NOARP & NUD_PERMANENT are pseudostates, they never change
    and make no address resolution or NUD.

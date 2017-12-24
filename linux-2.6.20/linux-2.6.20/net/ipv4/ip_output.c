@@ -163,11 +163,11 @@ EXPORT_SYMBOL_GPL(ip_build_and_send_pkt);
 
 static inline int ip_finish_output2(struct sk_buff *skb)
 {
-	struct dst_entry *dst = skb->dst;
-	struct net_device *dev = dst->dev;
-	int hh_len = LL_RESERVED_SPACE(dev);
+	struct dst_entry *dst = skb->dst;/* 获取路由缓存项 */
+	struct net_device *dev = dst->dev;/* 获取输出设备 */
+	int hh_len = LL_RESERVED_SPACE(dev);/* 需要为二层预留的长度，按照16字节对齐 */
 
-	/* Be paranoid, rather than too clever. */
+	/* Be paranoid, rather than too clever. 如果当前的skb的headroom小于需要预留的长度的话 */
 	if (unlikely(skb_headroom(skb) < hh_len && dev->hard_header)) {
 		struct sk_buff *skb2;
 
@@ -202,9 +202,11 @@ static inline int ip_finish_output(struct sk_buff *skb)
 		return dst_output(skb);
 	}
 #endif
+	/* 如果其报文总大小大于mtu，并且不支持gso的话，需要在输出前进行分片 */
 	if (skb->len > dst_mtu(skb->dst) && !skb_is_gso(skb))
+		/* 分片后输出 */
 		return ip_fragment(skb, ip_finish_output2);
-	else
+	else/* 直接输出 */
 		return ip_finish_output2(skb);
 }
 
@@ -266,15 +268,15 @@ int ip_mc_output(struct sk_buff *skb)
 			    ip_finish_output,
 			    !(IPCB(skb)->flags & IPSKB_REROUTED));
 }
-
+/* ip单播数据报输出接口处理 */
 int ip_output(struct sk_buff *skb)
 {
-	struct net_device *dev = skb->dst->dev;
+	struct net_device *dev = skb->dst->dev;/* 获取路由中指定的网络设备 */
 
 	IP_INC_STATS(IPSTATS_MIB_OUTREQUESTS);
 
-	skb->dev = dev;
-	skb->protocol = htons(ETH_P_IP);
+	skb->dev = dev;/* 替换skb指定的处理设备，换成出接口设备 */
+	skb->protocol = htons(ETH_P_IP);/* 设置其协议为ip协议 */
 
 	return NF_HOOK_COND(PF_INET, NF_IP_POST_ROUTING, skb, NULL, dev,
 		            ip_finish_output,
