@@ -136,6 +136,7 @@ static void arp_solicit(struct neighbour *neigh, struct sk_buff *skb);
 static void arp_error_report(struct neighbour *neigh, struct sk_buff *skb);
 static void parp_redo(struct sk_buff *skb);
 
+/* arp通用邻居操作函数 */
 static struct neigh_ops arp_generic_ops = {
 	.family =		AF_INET,
 	.solicit =		arp_solicit,
@@ -327,15 +328,15 @@ static void arp_error_report(struct neighbour *neigh, struct sk_buff *skb)
 	dst_link_failure(skb);
 	kfree_skb(skb);
 }
-
+/* 发送arp请求函数 */
 static void arp_solicit(struct neighbour *neigh, struct sk_buff *skb)
 {
 	__be32 saddr = 0;
 	u8  *dst_ha = NULL;
 	struct net_device *dev = neigh->dev;
-	__be32 target = *(__be32*)neigh->primary_key;
-	int probes = atomic_read(&neigh->probes);
-	struct in_device *in_dev = in_dev_get(dev);
+	__be32 target = *(__be32*)neigh->primary_key;/* 目的ip地址 */
+	int probes = atomic_read(&neigh->probes);/* 尝试次数 */
+	struct in_device *in_dev = in_dev_get(dev);/* 输入设备 */
 
 	if (!in_dev)
 		return;
@@ -377,7 +378,7 @@ static void arp_solicit(struct neighbour *neigh, struct sk_buff *skb)
 #endif
 		return;
 	}
-
+	/* 发送arp请求报文 */
 	arp_send(ARPOP_REQUEST, ETH_P_ARP, target, dev, saddr,
 		 dst_ha, dev->dev_addr, NULL);
 	if (dst_ha)
@@ -559,6 +560,7 @@ static inline int arp_fwd_proxy(struct in_device *in_dev, struct rtable *rt)
 /*
  *	Create an arp packet. If (dest_hw == NULL), we create a broadcast
  *	message.
+ * 创建一个arp报文，如果目的mac地址为空的话，选择广播地址
  */
 struct sk_buff *arp_create(int type, int ptype, __be32 dest_ip,
 			   struct net_device *dev, __be32 src_ip,
@@ -577,16 +579,18 @@ struct sk_buff *arp_create(int type, int ptype, __be32 dest_ip,
 				+ LL_RESERVED_SPACE(dev), GFP_ATOMIC);
 	if (skb == NULL)
 		return NULL;
-
+	/* headroom长度为设备链路层长度 */
 	skb_reserve(skb, LL_RESERVED_SPACE(dev));
+	/* 指向二层负载地址 */
 	skb->nh.raw = skb->data;
+	/* 将skb的tail延展到arp报文长度 */
 	arp = (struct arphdr *) skb_put(skb,sizeof(struct arphdr) + 2*(dev->addr_len+4));
 	skb->dev = dev;
 	skb->protocol = htons(ETH_P_ARP);
 	if (src_hw == NULL)
-		src_hw = dev->dev_addr;
+		src_hw = dev->dev_addr;/* 源地址 */
 	if (dest_hw == NULL)
-		dest_hw = dev->broadcast;
+		dest_hw = dev->broadcast;/* 不存在则为广播 */
 
 	/*
 	 *	Fill the device header for the ARP frame
@@ -674,6 +678,7 @@ void arp_xmit(struct sk_buff *skb)
 
 /*
  *	Create and send an arp packet.
+ * 创建并发送一个arp报文
  */
 void arp_send(int type, int ptype, __be32 dest_ip,
 	      struct net_device *dev, __be32 src_ip,
@@ -684,17 +689,18 @@ void arp_send(int type, int ptype, __be32 dest_ip,
 
 	/*
 	 *	No arp on this interface.
+	 * 如果这个借口标志了不发送arp报文的话，直接返回
 	 */
 	
 	if (dev->flags&IFF_NOARP)
 		return;
-
+	/* 创建arp报文 */
 	skb = arp_create(type, ptype, dest_ip, dev, src_ip,
 			 dest_hw, src_hw, target_hw);
 	if (skb == NULL) {
 		return;
 	}
-
+	/* 发送arp报文 */
 	arp_xmit(skb);
 }
 
