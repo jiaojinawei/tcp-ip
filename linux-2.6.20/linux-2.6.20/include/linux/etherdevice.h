@@ -89,6 +89,7 @@ static inline int is_broadcast_ether_addr(const u8 *addr)
  * a multicast address, and is not FF:FF:FF:FF:FF:FF.
  *
  * Return true if the address is valid.
+ * 判断是否为组播地址，或者全0的地址
  */
 static inline int is_valid_ether_addr(const u8 *addr)
 {
@@ -117,6 +118,7 @@ static inline void random_ether_addr(u8 *addr)
  * @addr2: Pointer other six-byte array containing the Ethernet address
  *
  * Compare two ethernet addresses, returns 0 if equal
+ * 以太网地址比较函数，如果相等则为0，否则返回1
  */
 static inline unsigned compare_ether_addr(const u8 *addr1, const u8 *addr2)
 {

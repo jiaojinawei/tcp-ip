@@ -27,6 +27,7 @@ int (*br_should_route_hook) (struct sk_buff **pskb) = NULL;
 
 static struct llc_sap *br_stp_sap;
 
+/* 桥协议初始化 */
 static int __init br_init(void)
 {
 	int err;
@@ -36,20 +37,20 @@ static int __init br_init(void)
 		printk(KERN_ERR "bridge: can't register sap for STP\n");
 		return -EADDRINUSE;
 	}
-
+	/* 转发数据库初始化 */
 	br_fdb_init();
-
+	/* 桥netfilter初始化 */
 	err = br_netfilter_init();
 	if (err)
 		goto err_out1;
-
+	/* 注册网络设备通知链结构 */
 	err = register_netdevice_notifier(&br_device_notifier);
 	if (err)
 		goto err_out2;
 
 	br_netlink_init();
 	brioctl_set(br_ioctl_deviceless_stub);
-	br_handle_frame_hook = br_handle_frame;
+	br_handle_frame_hook = br_handle_frame;/* 桥协议数据单元处理函数 */
 
 	br_fdb_get_hook = br_fdb_get;
 	br_fdb_put_hook = br_fdb_put;

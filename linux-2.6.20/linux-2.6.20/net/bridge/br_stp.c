@@ -30,7 +30,7 @@ static const char *br_port_state_names[] = {
 	[BR_STATE_FORWARDING] = "forwarding", 
 	[BR_STATE_BLOCKING] = "blocking",
 };
-
+/* 网桥打印桥的状态信息 */
 void br_log_state(const struct net_bridge_port *p)
 {
 	pr_info("%s: port %d(%s) entering %s state\n",
@@ -40,6 +40,7 @@ void br_log_state(const struct net_bridge_port *p)
 }
 
 /* called under bridge lock */
+/* 根据网桥的端口编号获取其端口的，描述控制块 */
 struct net_bridge_port *br_get_port(struct net_bridge *br, u16 port_no)
 {
 	struct net_bridge_port *p;
@@ -53,6 +54,7 @@ struct net_bridge_port *br_get_port(struct net_bridge *br, u16 port_no)
 }
 
 /* called under bridge lock */
+/* 非根桥需要选择一个离根桥最近的端口成为根端口 */
 static int br_should_become_root_port(const struct net_bridge_port *p, 
 				      u16 root_port)
 {
@@ -72,9 +74,10 @@ static int br_should_become_root_port(const struct net_bridge_port *p,
 		return 1;
 
 	rp = br_get_port(br, root_port);
-
+	
+	/* 比较两者之间的指定根端口id是否相同 */
 	t = memcmp(&p->designated_root, &rp->designated_root, 8);
-	if (t < 0)
+	if (t < 0)/* 选择端口id更小的 */
 		return 1;
 	else if (t > 0)
 		return 0;
@@ -104,12 +107,15 @@ static int br_should_become_root_port(const struct net_bridge_port *p,
 }
 
 /* called under bridge lock */
+/* 根网桥选择 */
 static void br_root_selection(struct net_bridge *br)
 {
 	struct net_bridge_port *p;
 	u16 root_port = 0;
 
+	/* 遍历该网桥的每一个端口 */
 	list_for_each_entry(p, &br->port_list, list) {
+		/* 判断该端口是否可以成为根端口 */
 		if (br_should_become_root_port(p, root_port))
 			root_port = p->port_no;
 
@@ -128,6 +134,7 @@ static void br_root_selection(struct net_bridge *br)
 }
 
 /* called under bridge lock */
+/* 网桥编程根网桥 */
 void br_become_root_bridge(struct net_bridge *br)
 {
 	br->max_age = br->bridge_max_age;
@@ -447,8 +454,10 @@ void br_received_config_bpdu(struct net_bridge_port *p, struct br_config_bpdu *b
 }
 
 /* called under bridge lock */
+/* 接收网桥生成树改变通知报文 */
 void br_received_tcn_bpdu(struct net_bridge_port *p)
 {
+	/* 判断该端口是不是指定端口，只有指定端口才能接收 */
 	if (br_is_designated_port(p)) {
 		pr_info("%s: received tcn bpdu on port %i(%s)\n",
 		       p->br->dev->name, p->port_no, p->dev->name);

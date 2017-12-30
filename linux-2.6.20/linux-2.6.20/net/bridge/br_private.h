@@ -35,6 +35,7 @@ typedef struct bridge_id bridge_id;
 typedef struct mac_addr mac_addr;
 typedef __u16 port_id;
 
+/* 网桥id，由两部分组成，共8个字节，两个字节的优先级，6个字节的mac地址 */
 struct bridge_id
 {
 	unsigned char	prio[2];
@@ -48,15 +49,15 @@ struct mac_addr
 
 struct net_bridge_fdb_entry
 {
-	struct hlist_node		hlist;
-	struct net_bridge_port		*dst;
+	struct hlist_node		hlist;/* 链接到hash表中 */
+	struct net_bridge_port		*dst;/* 目的桥端口 */
 
-	struct rcu_head			rcu;
-	atomic_t			use_count;
-	unsigned long			ageing_timer;
-	mac_addr			addr;
-	unsigned char			is_local;
-	unsigned char			is_static;
+	struct rcu_head			rcu;/* rcu保护 */
+	atomic_t			use_count;/* 使用计数 */
+	unsigned long			ageing_timer;/* 老化时间 */
+	mac_addr			    addr;/* mac地址 */
+	unsigned char			is_local;/* 是否是本地地址 */
+	unsigned char			is_static;/* 是否是静态地址 */
 };
 
 struct net_bridge_port
@@ -66,40 +67,41 @@ struct net_bridge_port
 	struct list_head		list;
 
 	/* STP */
-	u8				priority;
-	u8				state;
-	u16				port_no;
+	u8				priority;/* 端口的优先级 */
+	u8				state;/* 端口的状态 */
+	u16				port_no;/* 端口编号 */
 	unsigned char			topology_change_ack;
 	unsigned char			config_pending;
-	port_id				port_id;
-	port_id				designated_port;
+	port_id				port_id;/* 该端口的端口id */
+	port_id				designated_port;/* 网桥的指定端口 */
 	bridge_id			designated_root;
 	bridge_id			designated_bridge;
-	u32				path_cost;
-	u32				designated_cost;
+	u32				path_cost;/* 路径开销 */
+	u32				designated_cost;/* 指定端口的路径开销 */
 
-	struct timer_list		forward_delay_timer;
-	struct timer_list		hold_timer;
-	struct timer_list		message_age_timer;
+	struct timer_list		forward_delay_timer;/* 转发延迟定时器 */
+	struct timer_list		hold_timer;/* 持续定时器 */
+	struct timer_list		message_age_timer;/* 老化时间定时器 */
 	struct kobject			kobj;
 	struct delayed_work		carrier_check;
 	struct rcu_head			rcu;
 };
 
+/* 网桥设备描述控制块 */
 struct net_bridge
 {
-	spinlock_t			lock;
-	struct list_head		port_list;
-	struct net_device		*dev;
-	struct net_device_stats		statistics;
-	spinlock_t			hash_lock;
-	struct hlist_head		hash[BR_HASH_SIZE];
-	struct list_head		age_list;
-	unsigned long			feature_mask;
+	spinlock_t			lock;/* 锁 */
+	struct list_head		port_list;/* 桥端口链表 */
+	struct net_device		*dev;/* 指向其所属的二层网络设备描述控制块 */
+	struct net_device_stats		statistics;/* 统计信息 */
+	spinlock_t			hash_lock;/* hash锁 */
+	struct hlist_head		hash[BR_HASH_SIZE];/* 转发表项hash表 */
+	struct list_head		age_list;/* 老化队列 */
+	unsigned long			feature_mask;/* 特性掩码 */
 
 	/* STP */
-	bridge_id			designated_root;
-	bridge_id			bridge_id;
+	bridge_id			designated_root;/* 根网桥id */
+	bridge_id			bridge_id;/* 网桥id */
 	u32				root_path_cost;
 	unsigned long			max_age;
 	unsigned long			hello_time;
@@ -110,15 +112,15 @@ struct net_bridge
 	unsigned long			bridge_forward_delay;
 
 	u8				group_addr[ETH_ALEN];
-	u16				root_port;
-	unsigned char			stp_enabled;
-	unsigned char			topology_change;
-	unsigned char			topology_change_detected;
+	u16				root_port;/* 网桥的根端口，对于非根桥，需要将离根桥最近的端口设置为根端口 */
+	unsigned char			stp_enabled;/* 是否是能生成树协议 */
+	unsigned char			topology_change;/* top是否改变 */
+	unsigned char			topology_change_detected;/* top改变是否被检测到 */
 
-	struct timer_list		hello_timer;
-	struct timer_list		tcn_timer;
-	struct timer_list		topology_change_timer;
-	struct timer_list		gc_timer;
+	struct timer_list		hello_timer;/* 心跳定时器 */
+	struct timer_list		tcn_timer;/*  */
+	struct timer_list		topology_change_timer;/* top改变定时器 */
+	struct timer_list		gc_timer;/* 垃圾回收定时器 */
 	struct kobject			ifobj;
 };
 
@@ -126,6 +128,7 @@ extern struct notifier_block br_device_notifier;
 extern const u8 br_group_address[ETH_ALEN];
 
 /* called under bridge lock */
+/* 判断该网桥是不是根网桥，通过比较网桥id与指定根网桥id决定的 */
 static inline int br_is_root_bridge(const struct net_bridge *br)
 {
 	return !memcmp(&br->bridge_id, &br->designated_root, 8);

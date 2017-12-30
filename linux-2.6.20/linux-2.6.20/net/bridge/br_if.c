@@ -157,19 +157,19 @@ static void del_nbp(struct net_bridge_port *p)
 	struct net_bridge *br = p->br;
 	struct net_device *dev = p->dev;
 
-	sysfs_remove_link(&br->ifobj, dev->name);
+	sysfs_remove_link(&br->ifobj, dev->name);//
 
 	dev_set_promiscuity(dev, -1);
 
 	cancel_delayed_work(&p->carrier_check);
 
 	spin_lock_bh(&br->lock);
-	br_stp_disable_port(p);
+	br_stp_disable_port(p);/* 禁止端口的stp协议 */
 	spin_unlock_bh(&br->lock);
 
-	br_fdb_delete_by_port(br, p, 1);
+	br_fdb_delete_by_port(br, p, 1);/* 删除该端口的fdb表项 */
 
-	list_del_rcu(&p->list);
+	list_del_rcu(&p->list);/* 从链表中断开 */
 
 	rcu_assign_pointer(dev->br_port, NULL);
 
@@ -179,11 +179,11 @@ static void del_nbp(struct net_bridge_port *p)
 	call_rcu(&p->rcu, destroy_nbp_rcu);
 }
 
-/* called with RTNL */
+/* called with RTNL 回收网桥设备的资源*/
 static void del_br(struct net_bridge *br)
 {
 	struct net_bridge_port *p, *n;
-
+	/* 遍历其下所有的端口 */
 	list_for_each_entry_safe(p, n, &br->port_list, list) {
 		del_nbp(p);
 	}
@@ -193,29 +193,30 @@ static void del_br(struct net_bridge *br)
 	br_sysfs_delbr(br->dev);
  	unregister_netdevice(br->dev);
 }
-
+/* 新建一个桥设备被的api，传入的是桥的名字 */
 static struct net_device *new_bridge_dev(const char *name)
 {
-	struct net_bridge *br;
-	struct net_device *dev;
+	struct net_bridge *br;/* 桥私有描述控制块 */
+	struct net_device *dev;/* 网络设备控制块 */
 
+	/* 分配网络设备描述控制块，并且使用br_dev_setup进行初始化 */
 	dev = alloc_netdev(sizeof(struct net_bridge), name,
 			   br_dev_setup);
 	
 	if (!dev)
 		return NULL;
 
-	br = netdev_priv(dev);
-	br->dev = dev;
+	br = netdev_priv(dev);/* net_device的尾部即为其私有控制块net_bridge */
+	br->dev = dev;/* 指向其所属的网络设备 */
 
-	spin_lock_init(&br->lock);
-	INIT_LIST_HEAD(&br->port_list);
-	spin_lock_init(&br->hash_lock);
+	spin_lock_init(&br->lock);/* 初始化保护锁 */
+	INIT_LIST_HEAD(&br->port_list);/* 初始化端口链表 */
+	spin_lock_init(&br->hash_lock);/* 初始化hash表锁 */
 
 	br->bridge_id.prio[0] = 0x80;
 	br->bridge_id.prio[1] = 0x00;
 
-	memcpy(br->group_addr, br_group_address, ETH_ALEN);
+	memcpy(br->group_addr, br_group_address, ETH_ALEN);/* 生成树协议的目的组播地址，为了接收stp协议数据报文 */
 
 	br->feature_mask = dev->features;
 	br->stp_enabled = 0;
@@ -405,21 +406,23 @@ void br_features_recompute(struct net_bridge *br)
 			    NETIF_F_GSO_ROBUST;
 }
 
-/* called with RTNL */
+/* called with RTNL 给网桥添加一个端口 */
 int br_add_if(struct net_bridge *br, struct net_device *dev)
 {
 	struct net_bridge_port *p;
 	int err = 0;
 
+	/* 如果该设备是一个环回设备，或者该设备不是以太网设备的话，不能添加 */
 	if (dev->flags & IFF_LOOPBACK || dev->type != ARPHRD_ETHER)
 		return -EINVAL;
-
+	/* 如果该设备的发送函数不是br_dev_xmit，则返回 */
 	if (dev->hard_start_xmit == br_dev_xmit)
 		return -ELOOP;
 
 	if (dev->br_port != NULL)
 		return -EBUSY;
 
+	/* 创建一个新的网桥端口描述控制块  */
 	p = new_nbp(br, dev);
 	if (IS_ERR(p))
 		return PTR_ERR(p);
@@ -428,6 +431,7 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	if (err)
 		goto err0;
 
+	/* 插入转发表项 */
  	err = br_fdb_insert(br, p, dev->dev_addr);
 	if (err)
 		goto err1;

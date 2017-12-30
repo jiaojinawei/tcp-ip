@@ -21,6 +21,7 @@
 #include "br_private.h"
 
 /* Don't forward packets to originating port or forwarding diasabled */
+/* 不转发报文到接收端口中，这叫水平分割 */
 static inline int should_deliver(const struct net_bridge_port *p, 
 				 const struct sk_buff *skb)
 {
@@ -32,9 +33,10 @@ static inline unsigned packet_length(const struct sk_buff *skb)
 	return skb->len - (skb->protocol == htons(ETH_P_8021Q) ? VLAN_HLEN : 0);
 }
 
+/* 转发报文 */
 int br_dev_queue_push_xmit(struct sk_buff *skb)
 {
-	/* drop mtu oversized packets except gso */
+	/* drop mtu oversized packets except gso 报文长度太长且不支持gso直接丢弃报文*/
 	if (packet_length(skb) > skb->dev->mtu && !skb_is_gso(skb))
 		kfree_skb(skb);
 	else {
@@ -44,13 +46,14 @@ int br_dev_queue_push_xmit(struct sk_buff *skb)
 		else {
 			skb_push(skb, ETH_HLEN);
 
-			dev_queue_xmit(skb);
+			dev_queue_xmit(skb);/* 调用Dev-queue进行报文输出*/
 		}
 	}
 
 	return 0;
 }
 
+/* 下半部处理 */
 int br_forward_finish(struct sk_buff *skb)
 {
 	return NF_HOOK(PF_BRIDGE, NF_BR_POST_ROUTING, skb, NULL, skb->dev,
@@ -71,7 +74,7 @@ static void __br_forward(const struct net_bridge_port *to, struct sk_buff *skb)
 
 	indev = skb->dev;
 	skb->dev = to->dev;
-	skb->ip_summed = CHECKSUM_NONE;
+	skb->ip_summed = CHECKSUM_NONE;/* 没有进行过校验码计数 */
 
 	NF_HOOK(PF_BRIDGE, NF_BR_FORWARD, skb, indev, skb->dev,
 			br_forward_finish);
@@ -89,10 +92,12 @@ void br_deliver(const struct net_bridge_port *to, struct sk_buff *skb)
 }
 
 /* called with rcu_read_lock */
+/* 转发报文 */
 void br_forward(const struct net_bridge_port *to, struct sk_buff *skb)
 {
+	/*  */
 	if (should_deliver(to, skb)) {
-		__br_forward(to, skb);
+		__br_forward(to, skb);/* 转发报文 */
 		return;
 	}
 
@@ -120,6 +125,7 @@ static void br_flood(struct net_bridge *br, struct sk_buff *skb, int clone,
 
 	prev = NULL;
 
+	/* 报文泛洪，进行水平分割 */
 	list_for_each_entry_rcu(p, &br->port_list, list) {
 		if (should_deliver(p, skb)) {
 			if (prev != NULL) {

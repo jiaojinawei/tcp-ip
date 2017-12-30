@@ -803,10 +803,11 @@ dm9000_tx_done(struct net_device *dev, board_info_t * db)
 	}
 }
 
+/* dm9000网卡收包中断例程 */
 static irqreturn_t
 dm9000_interrupt(int irq, void *dev_id)
 {
-	struct net_device *dev = dev_id;
+	struct net_device *dev = dev_id;/* 获取网络设备二层描述控制块 */
 	board_info_t *db;
 	int int_status;
 	u8 reg_save;
@@ -888,6 +889,7 @@ struct dm9000_rxhdr {
 
 /*
  *  Received a packet and pass to upper layer
+ *  接收一个报文并将其发送到上层
  */
 static void
 dm9000_rx(struct net_device *dev)
@@ -963,9 +965,9 @@ dm9000_rx(struct net_device *dev)
 			(db->inblk)(db->io_data, rdptr, RxLen);
 			db->stats.rx_bytes += RxLen;
 
-			/* Pass to upper layer */
+			/* Pass to upper layer 传送到上层 */
 			skb->protocol = eth_type_trans(skb, dev);
-			netif_rx(skb);
+			netif_rx(skb);/* 传送到上层 */
 			db->stats.rx_packets++;
 
 		} else {

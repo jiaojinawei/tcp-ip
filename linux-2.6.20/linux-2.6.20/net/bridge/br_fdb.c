@@ -26,9 +26,10 @@
 static struct kmem_cache *br_fdb_cache __read_mostly;
 static int fdb_insert(struct net_bridge *br, struct net_bridge_port *source,
 		      const unsigned char *addr);
-
+/* 转发数据库初始化 */
 void __init br_fdb_init(void)
 {
+	/* 创建转发表项缓存 */
 	br_fdb_cache = kmem_cache_create("bridge_fdb_cache",
 					 sizeof(struct net_bridge_fdb_entry),
 					 0,
@@ -274,24 +275,24 @@ static inline struct net_bridge_fdb_entry *fdb_find(struct hlist_head *head,
 	}
 	return NULL;
 }
-
-static struct net_bridge_fdb_entry *fdb_create(struct hlist_head *head,
-					       struct net_bridge_port *source,
-					       const unsigned char *addr, 
-					       int is_local)
+/* 创建一个fdb表项 */
+static struct net_bridge_fdb_entry *fdb_create(struct hlist_head *head,/* hash桶头 */
+					       struct net_bridge_port *source,/* 源端口 */
+					       const unsigned char *addr, /* 转发目的mac地址 */
+					       int is_local)/* 是否是本地地址 */
 {
 	struct net_bridge_fdb_entry *fdb;
 
-	fdb = kmem_cache_alloc(br_fdb_cache, GFP_ATOMIC);
+	fdb = kmem_cache_alloc(br_fdb_cache, GFP_ATOMIC);/* 分配控制块内存 */
 	if (fdb) {
-		memcpy(fdb->addr.addr, addr, ETH_ALEN);
-		atomic_set(&fdb->use_count, 1);
-		hlist_add_head_rcu(&fdb->hlist, head);
+		memcpy(fdb->addr.addr, addr, ETH_ALEN);/* 设置地址     */
+		atomic_set(&fdb->use_count, 1);/* 引用计数为1 */
+		hlist_add_head_rcu(&fdb->hlist, head);/* 插入hash链表中 */
 
-		fdb->dst = source;
+		fdb->dst = source;/* 目的端口 */
 		fdb->is_local = is_local;
 		fdb->is_static = is_local;
-		fdb->ageing_timer = jiffies;
+		fdb->ageing_timer = jiffies;/* 老化时间 */
 	}
 	return fdb;
 }
@@ -299,12 +300,14 @@ static struct net_bridge_fdb_entry *fdb_create(struct hlist_head *head,
 static int fdb_insert(struct net_bridge *br, struct net_bridge_port *source,
 		  const unsigned char *addr)
 {
+	/* 对mac地址进行hash */
 	struct hlist_head *head = &br->hash[br_mac_hash(addr)];
 	struct net_bridge_fdb_entry *fdb;
 
 	if (!is_valid_ether_addr(addr))
 		return -EINVAL;
 
+	/* 查找是否存在相同的mac地址的转发表项 */
 	fdb = fdb_find(head, addr);
 	if (fdb) {
 		/* it is okay to have multiple ports with same 
@@ -319,7 +322,7 @@ static int fdb_insert(struct net_bridge *br, struct net_bridge_port *source,
 		fdb_delete(fdb);
  	}
 
-	if (!fdb_create(head, source, addr, 1))
+	if (!fdb_create(head, source, addr, 1))/* 创建表项，加入hash表 */
 		return -ENOMEM;
 
 	return 0;
@@ -330,9 +333,9 @@ int br_fdb_insert(struct net_bridge *br, struct net_bridge_port *source,
 {
 	int ret;
 
-	spin_lock_bh(&br->hash_lock);
-	ret = fdb_insert(br, source, addr);
-	spin_unlock_bh(&br->hash_lock);
+	spin_lock_bh(&br->hash_lock);/* 锁住hash锁 */
+	ret = fdb_insert(br, source, addr);/* 插入转发表项 */
+	spin_unlock_bh(&br->hash_lock);/* 解锁 */
 	return ret;
 }
 

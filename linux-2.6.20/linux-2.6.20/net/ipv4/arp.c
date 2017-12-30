@@ -1243,17 +1243,20 @@ static struct packet_type arp_packet_type = {
 };
 
 static int arp_proc_init(void);
-
+/* arp协议初始化 */
 void __init arp_init(void)
 {
+	/* 初始化arp的邻居表项 */
 	neigh_table_init(&arp_tbl);
-
+	/* 添加arp报文收包函数 */
 	dev_add_pack(&arp_packet_type);
 	arp_proc_init();
+	/* 如果支持sysctl的话注册该函数 */
 #ifdef CONFIG_SYSCTL
 	neigh_sysctl_register(NULL, &arp_tbl.parms, NET_IPV4,
 			      NET_IPV4_NEIGH, "ipv4", NULL, NULL);
 #endif
+	/* 注册网络设备消息通知链 */
 	register_netdevice_notifier(&arp_netdev_notifier);
 }
 

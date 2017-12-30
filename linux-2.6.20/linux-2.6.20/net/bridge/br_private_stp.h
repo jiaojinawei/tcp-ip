@@ -33,6 +33,7 @@ struct br_config_bpdu
 };
 
 /* called under bridge lock */
+/* 判断端口是否为指定端口，通过比较端口的id和指定端口id是否相等决定 */
 static inline int br_is_designated_port(const struct net_bridge_port *p)
 {
 	return !memcmp(&p->designated_bridge, &p->br->bridge_id, 8) &&

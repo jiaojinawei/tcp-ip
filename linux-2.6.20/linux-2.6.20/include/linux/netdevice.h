@@ -611,16 +611,17 @@ static inline int unregister_gifconf(unsigned int family)
 /*
  * Incoming packets are placed on per-cpu queues so that
  * no locking is needed.
+ * 输入报文将会被放置在这些每CPU变量队列中，可以不用锁
  */
 
 struct softnet_data
 {
-	struct net_device	*output_queue;
-	struct sk_buff_head	input_pkt_queue;
-	struct list_head	poll_list;
-	struct sk_buff		*completion_queue;
+	struct net_device	*output_queue;/* 输出设备队列，有报文输出时，将该报文输出设备挂在该链表上 */
+	struct sk_buff_head	input_pkt_queue;/* 非napi模式下接收报文队列 */
+	struct list_head	poll_list;/* napi模式下，将收到报文的设备挂在该队列上 */
+	struct sk_buff		*completion_queue;/* 发送完报文后，将报文的skb挂在该链表上，等到一定时机时将其释放 */
 
-	struct net_device	backlog_dev;	/* Sorry. 8) */
+	struct net_device	backlog_dev;	/* Sorry. 8)在非napi驱动时，用于将其挂入到poll_list链表中，从而触发在软中断中进行napi模式收包，一种兼容模式下的产物 */
 #ifdef CONFIG_NET_DMA
 	struct dma_chan		*net_dma;
 #endif
@@ -841,7 +842,9 @@ static inline int __netif_rx_schedule_prep(struct net_device *dev)
 	return !test_and_set_bit(__LINK_STATE_RX_SCHED, &dev->state);
 }
 
-/* Test if receive needs to be scheduled but only if up */
+/* Test if receive needs to be scheduled but only if up 
+ * 判断设备是否需要进行调度收包，一般需要设备状态为running并且没有挂入poll_list
+ */
 static inline int netif_rx_schedule_prep(struct net_device *dev)
 {
 	return netif_running(dev) && __netif_rx_schedule_prep(dev);

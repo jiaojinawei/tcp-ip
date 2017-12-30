@@ -164,16 +164,17 @@ static struct ethtool_ops br_ethtool_ops = {
 	.set_tso = br_set_tso,
 };
 
+/* 桥网络设备初始化 */
 void br_dev_setup(struct net_device *dev)
 {
-	memset(dev->dev_addr, 0, ETH_ALEN);
+	memset(dev->dev_addr, 0, ETH_ALEN);/* mac地址清零 */
 
-	ether_setup(dev);
+	ether_setup(dev);/* 以太网操作函数设置 */
 
 	dev->do_ioctl = br_dev_ioctl;
 	dev->get_stats = br_dev_get_stats;
-	dev->hard_start_xmit = br_dev_xmit;
-	dev->open = br_dev_open;
+	dev->hard_start_xmit = br_dev_xmit;/* 发包函数 */
+	dev->open = br_dev_open;/* open函数 */
 	dev->set_multicast_list = br_dev_set_multicast_list;
 	dev->change_mtu = br_change_mtu;
 	dev->destructor = free_netdev;

@@ -1845,6 +1845,7 @@ static int e100_rx_indicate(struct nic *nic, struct rx *rx,
 		nic->net_stats.rx_packets++;
 		nic->net_stats.rx_bytes += actual_size;
 		nic->netdev->last_rx = jiffies;
+		/* 调用该函数输入到上层协议 */
 		netif_receive_skb(skb);
 		if(work_done)
 			(*work_done)++;
@@ -1854,7 +1855,7 @@ static int e100_rx_indicate(struct nic *nic, struct rx *rx,
 
 	return 0;
 }
-
+/* 该函数用于从网卡中接收报文并将其输入到上层协议中 */
 static void e100_rx_clean(struct nic *nic, unsigned int *work_done,
 	unsigned int work_to_do)
 {
@@ -1948,10 +1949,11 @@ static int e100_rx_alloc_list(struct nic *nic)
 	return 0;
 }
 
+/* 100M网卡的中断例程 */
 static irqreturn_t e100_intr(int irq, void *dev_id)
 {
-	struct net_device *netdev = dev_id;
-	struct nic *nic = netdev_priv(netdev);
+	struct net_device *netdev = dev_id;/* 网络设备二层描述控制块 */
+	struct nic *nic = netdev_priv(netdev);/* 二层私有控制块信息 */
 	u8 stat_ack = readb(&nic->csr->scb.stat_ack);
 
 	DPRINTK(INTR, DEBUG, "stat_ack = 0x%02X\n", stat_ack);
@@ -1967,22 +1969,22 @@ static irqreturn_t e100_intr(int irq, void *dev_id)
 	if(stat_ack & stat_ack_rnr)
 		nic->ru_running = RU_SUSPENDED;
 
-	if(likely(netif_rx_schedule_prep(netdev))) {
-		e100_disable_irq(nic);
-		__netif_rx_schedule(netdev);
+	if(likely(netif_rx_schedule_prep(netdev))) {/* 判断网络设备是否已经准备好收包，并且没有处于收包状态 */
+		e100_disable_irq(nic);/* 关闭设备的软中断 */
+		__netif_rx_schedule(netdev);/* 调度该设备到poll_list链表中，开始进行收包 */
 	}
 
 	return IRQ_HANDLED;
 }
-
+/* 软中断中收包时调用该函数轮询处理报文 */
 static int e100_poll(struct net_device *netdev, int *budget)
 {
 	struct nic *nic = netdev_priv(netdev);
-	unsigned int work_to_do = min(netdev->quota, *budget);
+	unsigned int work_to_do = min(netdev->quota, *budget);/* 判断本次本网卡能处理的最多的报文数 */
 	unsigned int work_done = 0;
 	int tx_cleaned;
 
-	e100_rx_clean(nic, &work_done, work_to_do);
+	e100_rx_clean(nic, &work_done, work_to_do);/* 从网络设备中读取报文，并调用netif_receive_skb输入到上层协议中 */
 	tx_cleaned = e100_tx_clean(nic);
 
 	/* If no Rx and Tx cleanup work was done, exit polling mode. */

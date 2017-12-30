@@ -171,22 +171,24 @@ void br_stp_recalculate_bridge_id(struct net_bridge *br)
 }
 
 /* called under bridge lock */
+/* 设置网桥的优先级 */
 void br_stp_set_bridge_priority(struct net_bridge *br, u16 newprio)
 {
 	struct net_bridge_port *p;
 	int wasroot;
 
-	wasroot = br_is_root_bridge(br);
+	wasroot = br_is_root_bridge(br);/* 判断该网桥是否为根网桥 */
 
-	list_for_each_entry(p, &br->port_list, list) {
-		if (p->state != BR_STATE_DISABLED &&
+	list_for_each_entry(p, &br->port_list, list) {/* 遍历网桥端口 */
+		if (p->state != BR_STATE_DISABLED &&/* 只处理指定端口和非禁止状态的端口 */
 		    br_is_designated_port(p)) {
+		    /* 如果该端口是指定端口的话，重新设置该端口所属网桥的网桥id */
 			p->designated_bridge.prio[0] = (newprio >> 8) & 0xFF;
 			p->designated_bridge.prio[1] = newprio & 0xFF;
 		}
 
 	}
-
+	/* 修改该网桥的网桥id */
 	br->bridge_id.prio[0] = (newprio >> 8) & 0xFF;
 	br->bridge_id.prio[1] = newprio & 0xFF;
 	br_configuration_update(br);

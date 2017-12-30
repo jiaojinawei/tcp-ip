@@ -234,8 +234,8 @@ struct sk_buff {
 
 	struct sock		*sk;
 	struct skb_timeval	tstamp;
-	struct net_device	*dev;
-	struct net_device	*input_dev;
+	struct net_device	*dev;/* 当前报文处理设备，发送时为发送设备，输入时为输入设备 */
+	struct net_device	*input_dev;/* 报文的输入设备 */
 
 	union {
 		struct tcphdr	*th;
@@ -244,7 +244,7 @@ struct sk_buff {
 		struct igmphdr	*igmph;
 		struct iphdr	*ipiph;
 		struct ipv6hdr	*ipv6h;
-		unsigned char	*raw;
+		unsigned char	*raw;/* 二层负载起始地址 */
 	} h;
 
 	union {
@@ -269,9 +269,9 @@ struct sk_buff {
 	 */
 	char			cb[48];
 
-	unsigned int		len,
-				data_len,
-				mac_len;
+	unsigned int		len,/*报文总长度，随着报文的处理而改变 */
+				data_len,/* 非首段长度 */
+				mac_len;/* 链路层长度 */
 	union {
 		__wsum		csum;
 		__u32		csum_offset;

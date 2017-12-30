@@ -146,8 +146,8 @@
  */
 
 static DEFINE_SPINLOCK(ptype_lock);
-static struct list_head ptype_base[16];	/* 16 way hashed list */
-static struct list_head ptype_all;		/* Taps */
+static struct list_head ptype_base[16];	/* 16 way hashed list 处理上层协议 */
+static struct list_head ptype_all;		/* Taps 处理监听工具比如sniff，主要是处理原始套接字AF_PACKET */
 
 #ifdef CONFIG_NET_DMA
 static struct dma_client *net_dma_client;
@@ -1116,19 +1116,22 @@ void __netif_schedule(struct net_device *dev)
 }
 EXPORT_SYMBOL(__netif_schedule);
 
+/* 调度该网卡到poll_list队列中，并且设置其调度标志 */
 void __netif_rx_schedule(struct net_device *dev)
 {
 	unsigned long flags;
 
-	local_irq_save(flags);
-	dev_hold(dev);
+	local_irq_save(flags);/* 关闭中断 */
+	dev_hold(dev);/* 增加设备引用计数 */
+	/* 将设备挂入poll_list队列尾 */
 	list_add_tail(&dev->poll_list, &__get_cpu_var(softnet_data).poll_list);
-	if (dev->quota < 0)
+	if (dev->quota < 0)/* 增加该设备的本次收包的权重 */
 		dev->quota += dev->weight;
 	else
 		dev->quota = dev->weight;
+	/* 激活本网卡的收包软中断 */
 	__raise_softirq_irqoff(NET_RX_SOFTIRQ);
-	local_irq_restore(flags);
+	local_irq_restore(flags);/* 恢复中断 */
 }
 EXPORT_SYMBOL(__netif_rx_schedule);
 
@@ -1416,6 +1419,8 @@ out_kfree_skb:
  *      When calling this method, interrupts MUST be enabled.  This is because
  *      the BH enable code must have IRQs enabled so that it will not deadlock.
  *          --BLG
+ *  报文发送函数，将一个报文加入到网络设备的传输队列中。
+ *  调用者必须
  */
 
 int dev_queue_xmit(struct sk_buff *skb)
@@ -1568,6 +1573,7 @@ DEFINE_PER_CPU(struct netif_rx_stats, netdev_rx_stat) = { 0, };
  *	NET_RX_CN_MOD   (moderate congestion)
  *	NET_RX_CN_HIGH  (high congestion)
  *	NET_RX_DROP     (packet was dropped)
+ *  对于不支持napi的网卡，在收包中断例程中将会调用该函数，请看dm9000的中断例程
  *
  */
 
@@ -1591,8 +1597,8 @@ int netif_rx(struct sk_buff *skb)
 	queue = &__get_cpu_var(softnet_data);
 
 	__get_cpu_var(netdev_rx_stat).total++;
-	if (queue->input_pkt_queue.qlen <= netdev_max_backlog) {
-		if (queue->input_pkt_queue.qlen) {
+	if (queue->input_pkt_queue.qlen <= netdev_max_backlog) {/* 本cpu的报文输入队列超过了总数 */
+		if (queue->input_pkt_queue.qlen) {/* 如果已经存在报文的话，直接将报文放入队列，所有网卡都用一个例程 */
 enqueue:
 			dev_hold(skb->dev);
 			__skb_queue_tail(&queue->input_pkt_queue, skb);
@@ -1600,7 +1606,7 @@ enqueue:
 			return NET_RX_SUCCESS;
 		}
 
-		netif_rx_schedule(&queue->backlog_dev);
+		netif_rx_schedule(&queue->backlog_dev);/* 首次的话，调度软中断 */
 		goto enqueue;
 	}
 
@@ -1760,7 +1766,7 @@ static int ing_filter(struct sk_buff *skb)
 	return result;
 }
 #endif
-
+/* 报文上送上层接口 */
 int netif_receive_skb(struct sk_buff *skb)
 {
 	struct packet_type *ptype, *pt_prev;
@@ -1776,17 +1782,17 @@ int netif_receive_skb(struct sk_buff *skb)
 		net_timestamp(skb);
 
 	if (!skb->input_dev)
-		skb->input_dev = skb->dev;
+		skb->input_dev = skb->dev;/* 设置报文的输入设备 */
 
-	orig_dev = skb_bond(skb);
+	orig_dev = skb_bond(skb);/* 对于聚合口，选择原始设备 */
 
 	if (!orig_dev)
 		return NET_RX_DROP;
 
 	__get_cpu_var(netdev_rx_stat).total++;
 
-	skb->h.raw = skb->nh.raw = skb->data;
-	skb->mac_len = skb->nh.raw - skb->mac.raw;
+	skb->h.raw = skb->nh.raw = skb->data;/* 二层负载起始地址 */
+	skb->mac_len = skb->nh.raw - skb->mac.raw;/* 二层头长度 */
 
 	pt_prev = NULL;
 
@@ -1799,7 +1805,7 @@ int netif_receive_skb(struct sk_buff *skb)
 	}
 #endif
 
-	list_for_each_entry_rcu(ptype, &ptype_all, list) {
+	list_for_each_entry_rcu(ptype, &ptype_all, list) {/* 处理那些用来监听报文的工具，向sniffer */
 		if (!ptype->dev || ptype->dev == skb->dev) {
 			if (pt_prev) 
 				ret = deliver_skb(skb, pt_prev, orig_dev);
@@ -1853,7 +1859,7 @@ out:
 	rcu_read_unlock();
 	return ret;
 }
-
+/* 非napi网卡的poll实例 */
 static int process_backlog(struct net_device *backlog_dev, int *budget)
 {
 	int work = 0;
@@ -1861,12 +1867,12 @@ static int process_backlog(struct net_device *backlog_dev, int *budget)
 	struct softnet_data *queue = &__get_cpu_var(softnet_data);
 	unsigned long start_time = jiffies;
 
-	backlog_dev->weight = weight_p;
+	backlog_dev->weight = weight_p;/* 获取权重  */
 	for (;;) {
 		struct sk_buff *skb;
 		struct net_device *dev;
 
-		local_irq_disable();
+		local_irq_disable();/* 出队 */
 		skb = __skb_dequeue(&queue->input_pkt_queue);
 		if (!skb)
 			goto job_done;
@@ -1874,7 +1880,7 @@ static int process_backlog(struct net_device *backlog_dev, int *budget)
 
 		dev = skb->dev;
 
-		netif_receive_skb(skb);
+		netif_receive_skb(skb);/* 上送上层协议 */
 
 		dev_put(dev);
 
@@ -1900,40 +1906,41 @@ job_done:
 	local_irq_enable();
 	return 0;
 }
-
+/* 收包软中断例程 */
 static void net_rx_action(struct softirq_action *h)
 {
+	/* 获取本cpu的收包队列控制块 */
 	struct softnet_data *queue = &__get_cpu_var(softnet_data);
-	unsigned long start_time = jiffies;
-	int budget = netdev_budget;
+	unsigned long start_time = jiffies;/* 获取当前的jiffies数 */
+	int budget = netdev_budget;/* 获取本次收包的总权重 */
 	void *have;
 
-	local_irq_disable();
+	local_irq_disable();/* 关闭软中断 */
 
-	while (!list_empty(&queue->poll_list)) {
+	while (!list_empty(&queue->poll_list)) {/* 轮询napi的收包设备队列 */
 		struct net_device *dev;
 
-		if (budget <= 0 || jiffies - start_time > 1)
+		if (budget <= 0 || jiffies - start_time > 1)/* 判断是否本次收包额度已经用完或者使用了超过1秒的时间，则退出 */
 			goto softnet_break;
 
-		local_irq_enable();
+		local_irq_enable();/* 是能中断 */
 
 		dev = list_entry(queue->poll_list.next,
-				 struct net_device, poll_list);
-		have = netpoll_poll_lock(dev);
-
+				 struct net_device, poll_list);/* 获取队列的下一个设备 */
+		have = netpoll_poll_lock(dev);/* 获取设备锁 */
+		/* 如果该设备的份额已经用完，或者poll函数调用失败的话，重新将该设备放入到队列末尾，等待下次调度收包 */
 		if (dev->quota <= 0 || dev->poll(dev, &budget)) {
 			netpoll_poll_unlock(have);
 			local_irq_disable();
 			list_move_tail(&dev->poll_list, &queue->poll_list);
-			if (dev->quota < 0)
+			if (dev->quota < 0)/* 更新下次收包权重 */
 				dev->quota += dev->weight;
 			else
 				dev->quota = dev->weight;
 		} else {
 			netpoll_poll_unlock(have);
-			dev_put(dev);
-			local_irq_disable();
+			dev_put(dev);/* 减小设备引用计数 */
+			local_irq_disable();/* 关闭本地中断 */
 		}
 	}
 out:
@@ -3472,20 +3479,22 @@ static int __init netdev_dma_register(void) { return -ENODEV; }
 /*
  *       This is called single threaded during boot, so no need
  *       to take the rtnl semaphore.
+ * 初始化网络设备模块。在系统引导的时候遍历设备链表，卸载掉那些
+ * 注册失败的设备，让我们可以有一个正常使用的活跃的设备链表
  */
 static int __init net_dev_init(void)
 {
 	int i, rc = -ENOMEM;
 
-	BUG_ON(!dev_boot_phase);
+	BUG_ON(!dev_boot_phase);/* 该函数只能在设备引导阶段运行 */
 
-	if (dev_proc_init())
+	if (dev_proc_init())/* 初始化设备的proc文件系统 */
 		goto out;
 
-	if (netdev_sysfs_init())
+	if (netdev_sysfs_init())/* 网络设备文件系统初始化 */
 		goto out;
 
-	INIT_LIST_HEAD(&ptype_all);
+	INIT_LIST_HEAD(&ptype_all);/* 初始化三层协议报文处理函数控制块 */
 	for (i = 0; i < 16; i++) 
 		INIT_LIST_HEAD(&ptype_base[i]);
 
@@ -3497,30 +3506,31 @@ static int __init net_dev_init(void)
 
 	/*
 	 *	Initialise the packet receive queues.
+	 *  初始化报文接受队列，该队列是一个每cpu变量
 	 */
 
 	for_each_possible_cpu(i) {
 		struct softnet_data *queue;
 
 		queue = &per_cpu(softnet_data, i);
-		skb_queue_head_init(&queue->input_pkt_queue);
-		queue->completion_queue = NULL;
-		INIT_LIST_HEAD(&queue->poll_list);
-		set_bit(__LINK_STATE_START, &queue->backlog_dev.state);
-		queue->backlog_dev.weight = weight_p;
-		queue->backlog_dev.poll = process_backlog;
-		atomic_set(&queue->backlog_dev.refcnt, 1);
+		skb_queue_head_init(&queue->input_pkt_queue);/* 初始化非napi收包队列 */
+		queue->completion_queue = NULL;/* 将发包完成队列清空 */
+		INIT_LIST_HEAD(&queue->poll_list);/* 初始化napi模式下的收包设备队列 */
+		set_bit(__LINK_STATE_START, &queue->backlog_dev.state);/* 将虚拟收包设备的状态设置为启动状态 */
+		queue->backlog_dev.weight = weight_p;/* 设置虚拟收包设备的权重 */
+		queue->backlog_dev.poll = process_backlog;/* 虚拟收包函数的poll函数，将会在非napi模式下使用该函数进行收包 */
+		atomic_set(&queue->backlog_dev.refcnt, 1);/* 设置虚拟收包设备的引用计数为1 */
 	}
 
 	netdev_dma_register();
 
 	dev_boot_phase = 0;
 
-	open_softirq(NET_TX_SOFTIRQ, net_tx_action, NULL);
-	open_softirq(NET_RX_SOFTIRQ, net_rx_action, NULL);
+	open_softirq(NET_TX_SOFTIRQ, net_tx_action, NULL);/* 注册发送报文软中断 */
+	open_softirq(NET_RX_SOFTIRQ, net_rx_action, NULL);/* 注册接受报文软中断 */
 
-	hotcpu_notifier(dev_cpu_callback, 0);
-	dst_init();
+	hotcpu_notifier(dev_cpu_callback, 0);/* 注册cpu热插拔状态变化响应处理函数 */
+	dst_init();/* 注册网络设备事件通知函数 */
 	dev_mcast_init();
 	rc = 0;
 out:

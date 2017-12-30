@@ -949,6 +949,7 @@ static ctl_table brnf_net_table[] = {
 };
 #endif
 
+/* 网桥防火墙初始化 */
 int br_netfilter_init(void)
 {
 	int i;
