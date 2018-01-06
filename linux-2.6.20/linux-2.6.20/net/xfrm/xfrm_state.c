@@ -310,7 +310,7 @@ out:
 }
 
 static void xfrm_replay_timer_handler(unsigned long data);
-
+/* 分配一个状态 */
 struct xfrm_state *xfrm_state_alloc(void)
 {
 	struct xfrm_state *x;
@@ -318,16 +318,16 @@ struct xfrm_state *xfrm_state_alloc(void)
 	x = kzalloc(sizeof(struct xfrm_state), GFP_ATOMIC);
 
 	if (x) {
-		atomic_set(&x->refcnt, 1);
-		atomic_set(&x->tunnel_users, 0);
-		INIT_HLIST_NODE(&x->bydst);
+		atomic_set(&x->refcnt, 1);/* 设置引用计算为1 */
+		atomic_set(&x->tunnel_users, 0);/* 设置隧道使用者为0 */
+		INIT_HLIST_NODE(&x->bydst);/* 初始化三个hash指针 */
 		INIT_HLIST_NODE(&x->bysrc);
 		INIT_HLIST_NODE(&x->byspi);
-		init_timer(&x->timer);
-		x->timer.function = xfrm_timer_handler;
-		x->timer.data	  = (unsigned long)x;
-		init_timer(&x->rtimer);
-		x->rtimer.function = xfrm_replay_timer_handler;
+		init_timer(&x->timer);/* 初始化一个定时器--进行状态改变的定时器 */
+		x->timer.function = xfrm_timer_handler;/* 定时器到期操作函数 */
+		x->timer.data	  = (unsigned long)x;/* 定时器的参数是状态描述控制块 */
+		init_timer(&x->rtimer);/* 初始化回放定时器 */
+		x->rtimer.function = xfrm_replay_timer_handler;/* 回放定时器处理函数 */
 		x->rtimer.data     = (unsigned long)x;
 		x->curlft.add_time = (unsigned long)xtime.tv_sec;
 		x->lft.soft_byte_limit = XFRM_INF;
@@ -352,26 +352,26 @@ void __xfrm_state_destroy(struct xfrm_state *x)
 	schedule_work(&xfrm_state_gc_work);
 }
 EXPORT_SYMBOL(__xfrm_state_destroy);
-
+/* 状态删除函数 */
 int __xfrm_state_delete(struct xfrm_state *x)
 {
 	int err = -ESRCH;
 
-	if (x->km.state != XFRM_STATE_DEAD) {
-		x->km.state = XFRM_STATE_DEAD;
-		spin_lock(&xfrm_state_lock);
-		hlist_del(&x->bydst);
+	if (x->km.state != XFRM_STATE_DEAD) {/* 如果状态不是死亡状态 */
+		x->km.state = XFRM_STATE_DEAD;/* 设置其状态为死亡状态 */
+		spin_lock(&xfrm_state_lock);/* 获取全局状态锁 */
+		hlist_del(&x->bydst);/* 从hash表中断开 */
 		hlist_del(&x->bysrc);
 		if (x->id.spi)
 			hlist_del(&x->byspi);
-		xfrm_state_num--;
+		xfrm_state_num--;/* 状态个数统计减1 */
 		spin_unlock(&xfrm_state_lock);
 
 		/* All xfrm_state objects are created by xfrm_state_alloc.
 		 * The xfrm_state_alloc call gives a reference, and that
 		 * is what we are dropping here.
 		 */
-		__xfrm_state_put(x);
+		__xfrm_state_put(x);/* 减小引用计数，到0则由垃圾回收工作队列删除，释放其内存 */
 		err = 0;
 	}
 
@@ -390,29 +390,31 @@ int xfrm_state_delete(struct xfrm_state *x)
 	return err;
 }
 EXPORT_SYMBOL(xfrm_state_delete);
-
+/* 状态清洗，删除某种协议proto的所有的状态 */
 void xfrm_state_flush(u8 proto, struct xfrm_audit *audit_info)
 {
 	int i;
 	int err = 0;
 
 	spin_lock_bh(&xfrm_state_lock);
+	/* 循环遍历所有的hash桶 */
 	for (i = 0; i <= xfrm_state_hmask; i++) {
 		struct hlist_node *entry;
 		struct xfrm_state *x;
 restart:
+		/* 遍历桶下面的所有链表的每一个节点 */
 		hlist_for_each_entry(x, entry, xfrm_state_bydst+i, bydst) {
-			if (!xfrm_state_kern(x) &&
-			    xfrm_id_proto_match(x->id.proto, proto)) {
-				xfrm_state_hold(x);
-				spin_unlock_bh(&xfrm_state_lock);
+			if (!xfrm_state_kern(x) &&/* 不是正在使用的隧道 */
+			    xfrm_id_proto_match(x->id.proto, proto)) {/* 该状态是指定的协议 */
+				xfrm_state_hold(x);/* 增加引用计数，防止下面解开锁后被意外删除 */
+				spin_unlock_bh(&xfrm_state_lock);/* 解开锁 */
 
-				err = xfrm_state_delete(x);
+				err = xfrm_state_delete(x);/* 删除该状态 */
 				xfrm_audit_log(audit_info->loginuid,
 					       audit_info->secid,
 					       AUDIT_MAC_IPSEC_DELSA,
 					       err ? 0 : 1, NULL, x);
-				xfrm_state_put(x);
+				xfrm_state_put(x);/* 减小其引用计数 */
 
 				spin_lock_bh(&xfrm_state_lock);
 				goto restart;
@@ -423,7 +425,7 @@ restart:
 	wake_up(&km_waitq);
 }
 EXPORT_SYMBOL(xfrm_state_flush);
-
+/* 初始化刚生成的sa的选择子 */
 static int
 xfrm_init_tempsel(struct xfrm_state *x, struct flowi *fl,
 		  struct xfrm_tmpl *tmpl,
@@ -437,20 +439,20 @@ xfrm_init_tempsel(struct xfrm_state *x, struct flowi *fl,
 	xfrm_state_put_afinfo(afinfo);
 	return 0;
 }
-
+/* 状态spi查找函数 */
 static struct xfrm_state *__xfrm_state_lookup(xfrm_address_t *daddr, __be32 spi, u8 proto, unsigned short family)
 {
 	unsigned int h = xfrm_spi_hash(daddr, spi, proto, family);
 	struct xfrm_state *x;
 	struct hlist_node *entry;
-
+	/* 使用spi hash表进行查找 */
 	hlist_for_each_entry(x, entry, xfrm_state_byspi+h, byspi) {
 		if (x->props.family != family ||
 		    x->id.spi       != spi ||
-		    x->id.proto     != proto)
+		    x->id.proto     != proto)/* 协议家族，spi，协议类型必须都相等，才可以 */
 			continue;
 
-		switch (family) {
+		switch (family) {/* 然后根据协议族比较其目的地址 */
 		case AF_INET:
 			if (x->id.daddr.a4 != daddr->a4)
 				continue;
@@ -478,7 +480,7 @@ static struct xfrm_state *__xfrm_state_lookup_byaddr(xfrm_address_t *daddr, xfrm
 
 	hlist_for_each_entry(x, entry, xfrm_state_bysrc+h, bysrc) {
 		if (x->props.family != family ||
-		    x->id.proto     != proto)
+		    x->id.proto     != proto)/* 协议家族，协议号相等后才进行源目的ip地址的比较 */
 			continue;
 
 		switch (family) {
@@ -497,14 +499,14 @@ static struct xfrm_state *__xfrm_state_lookup_byaddr(xfrm_address_t *daddr, xfrm
 				continue;
 			break;
 		};
-
+		/* 增加其引用计数 */
 		xfrm_state_hold(x);
 		return x;
 	}
 
 	return NULL;
 }
-
+/* 根据协议家族，目的地址，协议号，是否使用spi进行查找对应sa*/
 static inline struct xfrm_state *
 __xfrm_state_locate(struct xfrm_state *x, int use_spi, int family)
 {
@@ -531,7 +533,7 @@ xfrm_state_find(xfrm_address_t *daddr, xfrm_address_t *saddr,
 		struct xfrm_policy *pol, int *err,
 		unsigned short family)
 {
-	unsigned int h = xfrm_dst_hash(daddr, saddr, tmpl->reqid, family);
+	unsigned int h = xfrm_dst_hash(daddr, saddr, tmpl->reqid, family);/* 计算hash值 */
 	struct hlist_node *entry;
 	struct xfrm_state *x, *x0;
 	int acquire_in_progress = 0;
@@ -539,7 +541,7 @@ xfrm_state_find(xfrm_address_t *daddr, xfrm_address_t *saddr,
 	struct xfrm_state *best = NULL;
 	
 	spin_lock_bh(&xfrm_state_lock);
-	hlist_for_each_entry(x, entry, xfrm_state_bydst+h, bydst) {
+	hlist_for_each_entry(x, entry, xfrm_state_bydst+h, bydst) {/* 遍历hash桶链表 */
 		if (x->props.family == family &&
 		    x->props.reqid == tmpl->reqid &&
 		    !(x->props.flags & XFRM_STATE_WILDRECV) &&
@@ -560,20 +562,21 @@ xfrm_state_find(xfrm_address_t *daddr, xfrm_address_t *saddr,
 			      something to install a state with proper
 			      selector.
 			 */
-			if (x->km.state == XFRM_STATE_VALID) {
-				if (!xfrm_selector_match(&x->sel, fl, family) ||
+			if (x->km.state == XFRM_STATE_VALID) {/* 参数完全一样，判断其状态是否合法 */
+				if (!xfrm_selector_match(&x->sel, fl, family) ||/* 判断选择子是否一致，不一致跳过 */
 				    !security_xfrm_state_pol_flow_match(x, pol, fl))
 					continue;
-				if (!best ||
-				    best->km.dying > x->km.dying ||
+				/* 暂时还没找到或者原来找到的状态的可用时间比新的小，将找到的状态置为best */
+				if (!best ||/* 原来没找到 */
+				    best->km.dying > x->km.dying ||/* 新的可用时间比较大 */
 				    (best->km.dying == x->km.dying &&
 				     best->curlft.add_time < x->curlft.add_time))
 					best = x;
-			} else if (x->km.state == XFRM_STATE_ACQ) {
+			} else if (x->km.state == XFRM_STATE_ACQ) {/* 如果是acq，则设置其标志位acq */
 				acquire_in_progress = 1;
 			} else if (x->km.state == XFRM_STATE_ERROR ||
-				   x->km.state == XFRM_STATE_EXPIRED) {
- 				if (xfrm_selector_match(&x->sel, fl, family) &&
+				   x->km.state == XFRM_STATE_EXPIRED) {/* 如果是超时状态或者错误状态 */
+ 				if (xfrm_selector_match(&x->sel, fl, family) &&/* 选择子反而匹配了，设置错误 */
 				    security_xfrm_state_pol_flow_match(x, pol, fl))
 					error = -ESRCH;
 			}
@@ -581,21 +584,24 @@ xfrm_state_find(xfrm_address_t *daddr, xfrm_address_t *saddr,
 	}
 
 	x = best;
-	if (!x && !error && !acquire_in_progress) {
-		if (tmpl->id.spi &&
+	if (!x && !error && !acquire_in_progress) {/* 没找到，没错误，没acq，根据spi在找一遍 */
+		if (tmpl->id.spi &&/* 根据模块的spi，地址，协议进行查找，应该是要找不到的，如果找到了，说明有问题，直接退出 */
 		    (x0 = __xfrm_state_lookup(daddr, tmpl->id.spi,
 					      tmpl->id.proto, family)) != NULL) {
+					      /* 本应找不到，但是却找到了，说明该spi已经备用了，再使用该spi是错误的 */
 			xfrm_state_put(x0);
 			error = -EEXIST;
 			goto out;
 		}
-		x = xfrm_state_alloc();
+		x = xfrm_state_alloc();/* 分配一个新的sa */
 		if (x == NULL) {
 			error = -ENOMEM;
 			goto out;
 		}
 		/* Initialize temporary selector matching only
-		 * to current session. */
+		 * to current session. 
+         * 初始化选择子
+		 */
 		xfrm_init_tempsel(x, fl, tmpl, daddr, saddr, family);
 
 		error = security_xfrm_state_alloc_acquire(x, pol->security, fl->secid);
@@ -605,7 +611,7 @@ xfrm_state_find(xfrm_address_t *daddr, xfrm_address_t *saddr,
 			x = NULL;
 			goto out;
 		}
-
+		/* 将新状态发送给用户空间 */
 		if (km_query(x, tmpl, pol) == 0) {
 			x->km.state = XFRM_STATE_ACQ;
 			hlist_add_head(&x->bydst, xfrm_state_bydst+h);
@@ -619,6 +625,7 @@ xfrm_state_find(xfrm_address_t *daddr, xfrm_address_t *saddr,
 			x->timer.expires = jiffies + XFRM_ACQ_EXPIRES*HZ;
 			add_timer(&x->timer);
 			xfrm_state_num++;
+			/* 检查hash表是否需要进行扩张 */
 			xfrm_hash_grow_check(x->bydst.next != NULL);
 		} else {
 			x->km.state = XFRM_STATE_DEAD;
@@ -782,21 +789,22 @@ static struct xfrm_state *__find_acq_core(unsigned short family, u8 mode, u32 re
 }
 
 static struct xfrm_state *__xfrm_find_acq_byseq(u32 seq);
-
+/* 添加一个状态到全局hash表中 */
 int xfrm_state_add(struct xfrm_state *x)
 {
 	struct xfrm_state *x1;
 	int family;
 	int err;
+	/* 当协议为esp，ah，comp以及any时为真，其他为假，即只有这三种协议会使用spi这个参数 */
 	int use_spi = xfrm_id_proto_match(x->id.proto, IPSEC_PROTO_ANY);
-
-	family = x->props.family;
+	/* 协议家族 */
+	family = x->props.family;/* 协议家族，ipv6还是ipv4，它们的ip地址长度不一样 */
 
 	spin_lock_bh(&xfrm_state_lock);
-
+	/* 查找是否已经存在一样的sa */
 	x1 = __xfrm_state_locate(x, use_spi, family);
 	if (x1) {
-		xfrm_state_put(x1);
+		xfrm_state_put(x1);/* 存在则减小引用计数，因为函数查找函数增加了引用计数 */
 		x1 = NULL;
 		err = -EEXIST;
 		goto out;
@@ -830,7 +838,7 @@ out:
 	return err;
 }
 EXPORT_SYMBOL(xfrm_state_add);
-
+/* 状态刷新， */
 int xfrm_state_update(struct xfrm_state *x)
 {
 	struct xfrm_state *x1;
@@ -897,13 +905,14 @@ EXPORT_SYMBOL(xfrm_state_update);
 
 int xfrm_state_check_expire(struct xfrm_state *x)
 {
+	/* 设置当前生命初始时间 */
 	if (!x->curlft.use_time)
 		x->curlft.use_time = (unsigned long)xtime.tv_sec;
 
-	if (x->km.state != XFRM_STATE_VALID)
+	if (x->km.state != XFRM_STATE_VALID)/* 如果状态非法，设置非法 */
 		return -EINVAL;
 
-	if (x->curlft.bytes >= x->lft.hard_byte_limit ||
+	if (x->curlft.bytes >= x->lft.hard_byte_limit ||/* 该状态处理的字节数是否已经超过了硬件限制 */
 	    x->curlft.packets >= x->lft.hard_packet_limit) {
 		x->km.state = XFRM_STATE_EXPIRED;
 		mod_timer(&x->timer, jiffies);
@@ -914,7 +923,7 @@ int xfrm_state_check_expire(struct xfrm_state *x)
 	    (x->curlft.bytes >= x->lft.soft_byte_limit ||
 	     x->curlft.packets >= x->lft.soft_packet_limit)) {
 		x->km.dying = 1;
-		km_state_expired(x, 0, 0);
+		km_state_expired(x, 0, 0);/* 通知sa超时 */
 	}
 	return 0;
 }
@@ -949,9 +958,9 @@ xfrm_state_lookup(xfrm_address_t *daddr, __be32 spi, u8 proto,
 {
 	struct xfrm_state *x;
 
-	spin_lock_bh(&xfrm_state_lock);
-	x = __xfrm_state_lookup(daddr, spi, proto, family);
-	spin_unlock_bh(&xfrm_state_lock);
+	spin_lock_bh(&xfrm_state_lock);/* 获取sa状态锁 */
+	x = __xfrm_state_lookup(daddr, spi, proto, family);/* 根据spi，协议号，协议族，目的地址进行sa查找 */
+	spin_unlock_bh(&xfrm_state_lock);/* 释放sa状态锁 */
 	return x;
 }
 EXPORT_SYMBOL(xfrm_state_lookup);
@@ -1523,7 +1532,7 @@ int xfrm_state_mtu(struct xfrm_state *x, int mtu)
 
 	return res;
 }
-
+/* 对一个sa进行初始化 */
 int xfrm_init_state(struct xfrm_state *x)
 {
 	struct xfrm_state_afinfo *afinfo;
@@ -1564,20 +1573,23 @@ error:
 }
 
 EXPORT_SYMBOL(xfrm_init_state);
- 
+
+/* 安全联盟初始化函数 */
 void __init xfrm_state_init(void)
 {
 	unsigned int sz;
-
+	/* 计算hash表的大小，开始的时候默认8个hash桶，但是随着状态数量的增多，可以
+	 * 可以动态扩容hash桶的数量
+	 */
 	sz = sizeof(struct hlist_head) * 8;
 
-	xfrm_state_bydst = xfrm_hash_alloc(sz);
-	xfrm_state_bysrc = xfrm_hash_alloc(sz);
-	xfrm_state_byspi = xfrm_hash_alloc(sz);
+	xfrm_state_bydst = xfrm_hash_alloc(sz);/* 初始化根据目的地址进行hash的全局hash变量 */
+	xfrm_state_bysrc = xfrm_hash_alloc(sz);/* 初始化根据源地址进行hash的全局hash变量 */
+	xfrm_state_byspi = xfrm_hash_alloc(sz);/* 初始化根据spi进行hash的全局hash表头 */
 	if (!xfrm_state_bydst || !xfrm_state_bysrc || !xfrm_state_byspi)
 		panic("XFRM: Cannot allocate bydst/bysrc/byspi hashes.");
-	xfrm_state_hmask = ((sz / sizeof(struct hlist_head)) - 1);
+	xfrm_state_hmask = ((sz / sizeof(struct hlist_head)) - 1);/* hash桶掩码 */
 
-	INIT_WORK(&xfrm_state_gc_work, xfrm_state_gc_task);
+	INIT_WORK(&xfrm_state_gc_work, xfrm_state_gc_task);/* 初始化垃圾回收工作队列 */
 }
 

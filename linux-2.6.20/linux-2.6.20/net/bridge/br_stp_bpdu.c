@@ -128,52 +128,54 @@ void br_send_tcn_bpdu(struct net_bridge_port *p)
  * Called from llc.
  *
  * NO locks, but rcu_read_lock (preempt_disabled)
+ * stp数据报处理函数
  */
 int br_stp_rcv(struct sk_buff *skb, struct net_device *dev,
 	       struct packet_type *pt, struct net_device *orig_dev)
 {
-	const struct llc_pdu_un *pdu = llc_pdu_un_hdr(skb);
-	const unsigned char *dest = eth_hdr(skb)->h_dest;
-	struct net_bridge_port *p = rcu_dereference(dev->br_port);
+	const struct llc_pdu_un *pdu = llc_pdu_un_hdr(skb);/* 获取二层负载 */
+	const unsigned char *dest = eth_hdr(skb)->h_dest;/* 获取目的mac */
+	struct net_bridge_port *p = rcu_dereference(dev->br_port);/* 获取网桥端口描述控制块 */
 	struct net_bridge *br;
 	const unsigned char *buf;
 
-	if (!p)
+	if (!p)/* 基础校验 */
 		goto err;
-
-	if (pdu->ssap != LLC_SAP_BSPAN
-	    || pdu->dsap != LLC_SAP_BSPAN
+	/* 判断协议是否正确 */
+	if (pdu->ssap != LLC_SAP_BSPAN/* 生成树协议 */
+	    || pdu->dsap != LLC_SAP_BSPAN/*  */
 	    || pdu->ctrl_1 != LLC_PDU_TYPE_U)
 		goto err;
 
-	if (!pskb_may_pull(skb, 4))
+	if (!pskb_may_pull(skb, 4))/* 偏移四个字节 */
 		goto err;
 
 	/* compare of protocol id and version */
+	/* 协议版本号 */
 	buf = skb->data;
 	if (buf[0] != 0 || buf[1] != 0 || buf[2] != 0)
 		goto err;
 
-	br = p->br;
+	br = p->br;/*  获取端口所在网桥 */
 	spin_lock(&br->lock);
 
-	if (p->state == BR_STATE_DISABLED
+	if (p->state == BR_STATE_DISABLED/* 端口down，或者处于禁止状态，或者没有是能stp协议，不处理该报文，直接退出 */
 	    || !br->stp_enabled
 	    || !(br->dev->flags & IFF_UP))
 		goto out;
-
+	/* 比较目的地址是否为桥生成树协议的目的组播地址 */
 	if (compare_ether_addr(dest, br->group_addr) != 0)
 		goto out;
 
-	buf = skb_pull(skb, 3);
+	buf = skb_pull(skb, 3);/* 偏移掉协议和版本号 */
 
-	if (buf[0] == BPDU_TYPE_CONFIG) {
+	if (buf[0] == BPDU_TYPE_CONFIG) {/* 获取报文类型，这里处理配置BPDU */
 		struct br_config_bpdu bpdu;
 
-		if (!pskb_may_pull(skb, 32))
+		if (!pskb_may_pull(skb, 32))/* 判断32个字节是否都在第一个片段 */
 			goto out;
 
-		buf = skb->data;
+		buf = skb->data;/* 获取数据，解析报文到bpdu结构体中 */
 		bpdu.topology_change = (buf[1] & 0x01) ? 1 : 0;
 		bpdu.topology_change_ack = (buf[1] & 0x80) ? 1 : 0;
 
@@ -200,15 +202,15 @@ int br_stp_rcv(struct sk_buff *skb, struct net_device *dev,
 		bpdu.bridge_id.addr[5] = buf[21];
 		bpdu.port_id = (buf[22] << 8) | buf[23];
 
-		bpdu.message_age = br_get_ticks(buf+24);
-		bpdu.max_age = br_get_ticks(buf+26);
-		bpdu.hello_time = br_get_ticks(buf+28);
-		bpdu.forward_delay = br_get_ticks(buf+30);
+		bpdu.message_age = br_get_ticks(buf+24);/* 获取信息保持时间 */
+		bpdu.max_age = br_get_ticks(buf+26);/* 获取信息保持时间 */
+		bpdu.hello_time = br_get_ticks(buf+28);/* 获取心跳报文时间 */
+		bpdu.forward_delay = br_get_ticks(buf+30);/* 获取转发延迟时间 */
 
-		br_received_config_bpdu(p, &bpdu);
+		br_received_config_bpdu(p, &bpdu);/* 处理 */
 	}
 
-	else if (buf[0] == BPDU_TYPE_TCN) {
+	else if (buf[0] == BPDU_TYPE_TCN) {/* top变化通知消息处理 */
 		br_received_tcn_bpdu(p);
 	}
  out:

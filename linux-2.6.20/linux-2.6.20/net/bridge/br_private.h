@@ -70,14 +70,14 @@ struct net_bridge_port
 	u8				priority;/* 端口的优先级 */
 	u8				state;/* 端口的状态 */
 	u16				port_no;/* 端口编号 */
-	unsigned char			topology_change_ack;
-	unsigned char			config_pending;
-	port_id				port_id;/* 该端口的端口id */
-	port_id				designated_port;/* 网桥的指定端口 */
-	bridge_id			designated_root;
-	bridge_id			designated_bridge;
-	u32				path_cost;/* 路径开销 */
-	u32				designated_cost;/* 指定端口的路径开销 */
+	unsigned char			topology_change_ack;/* 当设定该标识后，经过该端口传出的配置BPDU必须舍得给TCA标记 */
+	unsigned char			config_pending;/* 当一个配置BPDU由于被Hold定时器组设而等待传输时，该标志为1 */
+	port_id				port_id;/* 该端口的端口id，端口id有端口的优先级相关，是一个合成值，端口id由端口优先级和端口编号合成的 */
+	port_id				designated_port;/* 指定的发送当前BPDU的网桥端口ID---即收到的BPDU是发送网桥的哪个端口发送的 */
+	bridge_id			designated_root;/* 指定的根网桥的网桥id */
+	bridge_id			designated_bridge;/* 指定的发送当前BPDU的网桥ID---即收到的BPDU是哪个网桥发送的 */
+	u32				path_cost;/* 端口路径开销 */
+	u32				designated_cost;/* 指定的到根网桥的路径开销 */
 
 	struct timer_list		forward_delay_timer;/* 转发延迟定时器 */
 	struct timer_list		hold_timer;/* 持续定时器 */

@@ -20,7 +20,7 @@
 
 #include <asm/uaccess.h>
 #include "br_private.h"
-
+/* 网桥设备获取统计信息 */
 static struct net_device_stats *br_dev_get_stats(struct net_device *dev)
 {
 	struct net_bridge *br = netdev_priv(dev);
@@ -28,6 +28,7 @@ static struct net_device_stats *br_dev_get_stats(struct net_device *dev)
 }
 
 /* net device transmit always called with no BH (preempt_disabled) */
+/* 网桥设备发送函数 */
 int br_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct net_bridge *br = netdev_priv(dev);
@@ -49,7 +50,7 @@ int br_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	return 0;
 }
-
+/* 打开一个网桥设备，计算其特性，开启stp功能 */
 static int br_dev_open(struct net_device *dev)
 {
 	struct net_bridge *br = netdev_priv(dev);
@@ -60,7 +61,7 @@ static int br_dev_open(struct net_device *dev)
 
 	return 0;
 }
-
+/* 设置网桥设备能接受的组播地址列表 */
 static void br_dev_set_multicast_list(struct net_device *dev)
 {
 }
@@ -85,6 +86,7 @@ static int br_change_mtu(struct net_device *dev, int new_mtu)
 
 /* Allow setting mac address of pseudo-bridge to be same as
  * any of the bound interfaces
+ * 设置网桥设备的ip地址
  */
 static int br_set_mac_address(struct net_device *dev, void *p)
 {

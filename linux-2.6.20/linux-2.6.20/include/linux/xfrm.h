@@ -19,6 +19,7 @@ typedef union
 /* Ident of a specific xfrm_state. It is used on input to lookup
  * the state by (spi,daddr,ah/esp) or to store information about
  * spi, protocol and tunnel address on output.
+ * 用于表示一个具体的sa，是一个三元组
  */
 struct xfrm_id
 {
@@ -65,20 +66,20 @@ struct xfrm_selector
 
 struct xfrm_lifetime_cfg
 {
-	__u64	soft_byte_limit;
-	__u64	hard_byte_limit;
-	__u64	soft_packet_limit;
-	__u64	hard_packet_limit;
-	__u64	soft_add_expires_seconds;
-	__u64	hard_add_expires_seconds;
-	__u64	soft_use_expires_seconds;
-	__u64	hard_use_expires_seconds;
+	__u64	soft_byte_limit;/* 软件限制该状态处理的字节数 */
+	__u64	hard_byte_limit;/* 硬件限制的该状态处理的字节数 */
+	__u64	soft_packet_limit;/* 软件限制该状态处理的包数 */
+	__u64	hard_packet_limit;/* 硬件限制的该状态处理的包数 */
+	__u64	soft_add_expires_seconds;/* 软件限制的该状态超时秒数 */
+	__u64	hard_add_expires_seconds;/* 硬件限制的该状态超时秒数 */
+	__u64	soft_use_expires_seconds;/* 软件限制的该状态超时秒数*/
+	__u64	hard_use_expires_seconds;/* 硬件限制的该状态超时秒数 */
 };
 
 struct xfrm_lifetime_cur
 {
-	__u64	bytes;
-	__u64	packets;
+	__u64	bytes;/* 已经处理的字节数 */
+	__u64	packets;/* 已经处理的包数 */
 	__u64	add_time;
 	__u64	use_time;
 };

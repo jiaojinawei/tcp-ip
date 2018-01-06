@@ -33,7 +33,7 @@ static int br_is_designated_for_some_port(const struct net_bridge *br)
 
 	return 0;
 }
-
+/* 心跳定时器超时--只有根桥才会有该定时器，发送心跳报文 */
 static void br_hello_timer_expired(unsigned long arg)
 {
 	struct net_bridge *br = (struct net_bridge *)arg;
@@ -41,13 +41,13 @@ static void br_hello_timer_expired(unsigned long arg)
 	pr_debug("%s: hello timer expired\n", br->dev->name);
 	spin_lock(&br->lock);
 	if (br->dev->flags & IFF_UP) {
-		br_config_bpdu_generation(br);
+		br_config_bpdu_generation(br);/* 生成心跳报文，并发送 */
 
-		mod_timer(&br->hello_timer, jiffies + br->hello_time);
+		mod_timer(&br->hello_timer, jiffies + br->hello_time);/* 更新下次心跳时间 */
 	}
 	spin_unlock(&br->lock);
 }
-
+/* 端口配置信息老化定时器 */
 static void br_message_age_timer_expired(unsigned long arg)
 {
 	struct net_bridge_port *p = (struct net_bridge_port *) arg;
@@ -74,12 +74,12 @@ static void br_message_age_timer_expired(unsigned long arg)
 	spin_lock(&br->lock);
 	if (p->state == BR_STATE_DISABLED)
 		goto unlock;
-	was_root = br_is_root_bridge(br);
+	was_root = br_is_root_bridge(br);/* 判断该端口是否为根端口 */
 
-	br_become_designated_port(p);
-	br_configuration_update(br);
-	br_port_state_selection(br);
-	if (br_is_root_bridge(br) && !was_root)
+	br_become_designated_port(p);/* 变成指定端口 */
+	br_configuration_update(br);/* 配置更新 */
+	br_port_state_selection(br);/* 端口状态选择 */
+	if (br_is_root_bridge(br) && !was_root)/* 如果 */
 		br_become_root_bridge(br);
  unlock:
 	spin_unlock(&br->lock);
@@ -105,7 +105,7 @@ static void br_forward_delay_timer_expired(unsigned long arg)
 	br_log_state(p);
 	spin_unlock(&br->lock);
 }
-
+/* top变化定时器超时处理函数 */
 static void br_tcn_timer_expired(unsigned long arg)
 {
 	struct net_bridge *br = (struct net_bridge *) arg;
@@ -113,7 +113,7 @@ static void br_tcn_timer_expired(unsigned long arg)
 	pr_debug("%s: tcn timer expired\n", br->dev->name);
 	spin_lock(&br->lock);
 	if (br->dev->flags & IFF_UP) {
-		br_transmit_tcn(br);
+		br_transmit_tcn(br);/* 发送top变化报文 */
 	
 		mod_timer(&br->tcn_timer,jiffies + br->bridge_hello_time);
 	}
@@ -143,9 +143,11 @@ static void br_hold_timer_expired(unsigned long arg)
 		br_transmit_config(p);
 	spin_unlock(&p->br->lock);
 }
-
+/* 每一个网桥都有三个定时器，分别是心跳定时器，top改变定时器，top改变通知定时器 */
 void br_stp_timer_init(struct net_bridge *br)
 {
+	/* 心跳定时器，只有在网桥认为自己是根网桥是才会存在，一旦网桥认为自己不是根网桥时，会删除该定时器
+	 * 创建网桥时，都会认为自己是根网桥*/
 	setup_timer(&br->hello_timer, br_hello_timer_expired,
 		      (unsigned long) br);
 

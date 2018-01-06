@@ -33,10 +33,11 @@ static inline port_id br_make_port_id(__u8 priority, __u16 port_no)
 }
 
 /* called under bridge lock */
+/* 端口初始化的时候默认字节是指定端口 */
 void br_init_port(struct net_bridge_port *p)
 {
 	p->port_id = br_make_port_id(p->priority, p->port_no);
-	br_become_designated_port(p);
+	br_become_designated_port(p);/* 初始化时默认是指定端口 */
 	p->state = BR_STATE_BLOCKING;
 	p->topology_change_ack = 0;
 	p->config_pending = 0;
@@ -62,6 +63,7 @@ void br_stp_enable_bridge(struct net_bridge *br)
 }
 
 /* NO locks held */
+/* 禁止桥的生成树功能 */
 void br_stp_disable_bridge(struct net_bridge *br)
 {
 	struct net_bridge_port *p;
@@ -84,6 +86,7 @@ void br_stp_disable_bridge(struct net_bridge *br)
 }
 
 /* called under bridge lock */
+/* 是能该端口的生成树协议 */
 void br_stp_enable_port(struct net_bridge_port *p)
 {
 	br_init_port(p);
@@ -92,6 +95,7 @@ void br_stp_enable_port(struct net_bridge_port *p)
 }
 
 /* called under bridge lock */
+/* 禁止端口的生成树功能 */
 void br_stp_disable_port(struct net_bridge_port *p)
 {
 	struct net_bridge *br;
@@ -102,24 +106,26 @@ void br_stp_disable_port(struct net_bridge_port *p)
 	       br->dev->name, p->port_no, p->dev->name, "disabled");
 
 	br_ifinfo_notify(RTM_DELLINK, p);
-
+	/* 获取桥是否为根桥 */
 	wasroot = br_is_root_bridge(br);
+	/* 进行指定端口选举 */
 	br_become_designated_port(p);
+	/* 设置其端口为禁止状态 */
 	p->state = BR_STATE_DISABLED;
 	p->topology_change_ack = 0;
 	p->config_pending = 0;
-
+	/* 删除端口的定时器 */
 	del_timer(&p->message_age_timer);
 	del_timer(&p->forward_delay_timer);
 	del_timer(&p->hold_timer);
-
+	/* 删除所有该端口的端口转发表项，不删除静态的fdb表项 */
 	br_fdb_delete_by_port(br, p, 0);
-
+	/* 更新网桥配置--进行根端口选举，指定端口选举 */
 	br_configuration_update(br);
 
 	br_port_state_selection(br);
 
-	if (br_is_root_bridge(br) && !wasroot)
+	if (br_is_root_bridge(br) && !wasroot)/* 根桥改变，重新选举根桥 */
 		br_become_root_bridge(br);
 }
 
@@ -154,6 +160,7 @@ void br_stp_change_bridge_id(struct net_bridge *br, const unsigned char *addr)
 static const unsigned char br_mac_zero[6];
 
 /* called under bridge lock */
+/* 重新计算桥id */
 void br_stp_recalculate_bridge_id(struct net_bridge *br)
 {
 	const unsigned char *addr = br_mac_zero;
@@ -194,34 +201,36 @@ void br_stp_set_bridge_priority(struct net_bridge *br, u16 newprio)
 	br_configuration_update(br);
 	br_port_state_selection(br);
 	if (br_is_root_bridge(br) && !wasroot)
-		br_become_root_bridge(br);
+		br_become_root_bridge(br);/* 进行根桥的重新选举 */
 }
 
 /* called under bridge lock */
+/* 设置端口的优先级 */
 void br_stp_set_port_priority(struct net_bridge_port *p, u8 newprio)
 {
 	port_id new_port_id = br_make_port_id(newprio, p->port_no);
 
-	if (br_is_designated_port(p))
-		p->designated_port = new_port_id;
+	if (br_is_designated_port(p))/* 只有该端口是指定端口，才需要改变其所属的指定端口变量为自身 */
+		p->designated_port = new_port_id;/**/
 
 	p->port_id = new_port_id;
 	p->priority = newprio;
 	if (!memcmp(&p->br->bridge_id, &p->designated_bridge, 8) &&
-	    p->port_id < p->designated_port) {
+	    p->port_id < p->designated_port) {/* 满足条件，成为新的指定端口 */
 		br_become_designated_port(p);
 		br_port_state_selection(p->br);
 	}
 }
 
 /* called under bridge lock */
+/* 设置路径开销 */
 void br_stp_set_path_cost(struct net_bridge_port *p, u32 path_cost)
 {
-	p->path_cost = path_cost;
-	br_configuration_update(p->br);
-	br_port_state_selection(p->br);
+	p->path_cost = path_cost;/* 经过该端口的路径开销，根据端口的带宽相关，带宽越大，开销越小 */
+	br_configuration_update(p->br);/* 改变端口的开销后，需要进行根端口的重新选举和指定端口的重新选举 */
+	br_port_state_selection(p->br);/* 端口状态的重新改变 */
 }
-
+/* 显示网桥id，共八个字节 */
 ssize_t br_show_bridge_id(char *buf, const struct bridge_id *id)
 {
 	return sprintf(buf, "%.2x%.2x.%.2x%.2x%.2x%.2x%.2x%.2x\n",

@@ -20,7 +20,7 @@ static int xfrm4_init_flags(struct xfrm_state *x)
 		x->props.flags |= XFRM_STATE_NOPMTUDISC;
 	return 0;
 }
-
+/* 初始化sa的选择子 */
 static void
 __xfrm4_init_tempsel(struct xfrm_state *x, struct flowi *fl,
 		     struct xfrm_tmpl *tmpl,

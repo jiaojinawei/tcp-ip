@@ -554,7 +554,7 @@ int skb_icv_walk(const struct sk_buff *skb, struct hash_desc *desc,
 			sg.offset = frag->page_offset + offset-start;
 			sg.length = copy;
 			
-			err = icv_update(desc, &sg, copy);
+			err = icv_update(desc, &sg, copy);/* 计算hash值 */
 			if (unlikely(err))
 				return err;
 

@@ -204,6 +204,7 @@ struct sock {
 	socket_lock_t		sk_lock;
 	wait_queue_head_t	*sk_sleep;
 	struct dst_entry	*sk_dst_cache;
+	/* 与ipsec策略相关的结构 */
 	struct xfrm_policy	*sk_policy[2];
 	rwlock_t		sk_dst_lock;
 	atomic_t		sk_rmem_alloc;

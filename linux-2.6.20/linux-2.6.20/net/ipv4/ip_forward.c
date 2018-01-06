@@ -58,7 +58,7 @@ int ip_forward(struct sk_buff *skb)
 	struct iphdr *iph;	/* Our header ip头*/
 	struct rtable *rt;	/* Route we use ip路由 */
 	struct ip_options * opt	= &(IPCB(skb)->opt);/* 获取ip层私有控制块 */
-
+	/* 策略检查，查看该报文是否需要进行安全策略，如果需要进行策略检查，返回1表示检查成功，否则检查失败，丢弃报文 */
 	if (!xfrm4_policy_check(NULL, XFRM_POLICY_FWD, skb))
 		goto drop;
 	/* 如果有路由告警选项的话，调用ip_call_ra_chain处理 */
@@ -77,7 +77,7 @@ int ip_forward(struct sk_buff *skb)
 	 */
 	if (skb->nh.iph->ttl <= 1)
                 goto too_many_hops;
-
+	/* 进行ipsec路由选择 */
 	if (!xfrm4_route_forward(skb))
 		goto drop;
 

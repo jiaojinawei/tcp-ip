@@ -35,7 +35,7 @@ void __init br_fdb_init(void)
 					 0,
 					 SLAB_HWCACHE_ALIGN, NULL, NULL);
 }
-
+/* 销毁fdb-slab缓存 */
 void __exit br_fdb_fini(void)
 {
 	kmem_cache_destroy(br_fdb_cache);
@@ -44,30 +44,31 @@ void __exit br_fdb_fini(void)
 
 /* if topology_changing then use forward_delay (default 15 sec)
  * otherwise keep longer (default 5 minutes)
+ * 持续定时时间，top改变15秒，其他情况下5分钟
  */
 static __inline__ unsigned long hold_time(const struct net_bridge *br)
 {
 	return br->topology_change ? br->forward_delay : br->ageing_time;
 }
-
+/* 判断动态转发表项是否超时 */
 static __inline__ int has_expired(const struct net_bridge *br,
 				  const struct net_bridge_fdb_entry *fdb)
 {
 	return !fdb->is_static 
 		&& time_before_eq(fdb->ageing_timer + hold_time(br), jiffies);
 }
-
+/* 对mac地址进行hash */
 static __inline__ int br_mac_hash(const unsigned char *mac)
 {
 	return jhash(mac, ETH_ALEN, 0) & (BR_HASH_SIZE - 1);
 }
-
+/* 删除转发表项 */
 static __inline__ void fdb_delete(struct net_bridge_fdb_entry *f)
 {
 	hlist_del_rcu(&f->hlist);
 	br_fdb_put(f);
 }
-
+/* fdb表项进行地址变换 */
 void br_fdb_changeaddr(struct net_bridge_port *p, const unsigned char *newaddr)
 {
 	struct net_bridge *br = p->br;
@@ -76,13 +77,14 @@ void br_fdb_changeaddr(struct net_bridge_port *p, const unsigned char *newaddr)
 	spin_lock_bh(&br->hash_lock);
 
 	/* Search all chains since old address/hash is unknown */
+	/* 遍历转发hash表 */
 	for (i = 0; i < BR_HASH_SIZE; i++) {
 		struct hlist_node *h;
-		hlist_for_each(h, &br->hash[i]) {
+		hlist_for_each(h, &br->hash[i]) {/* 遍历每一个表项 */
 			struct net_bridge_fdb_entry *f;
 
 			f = hlist_entry(h, struct net_bridge_fdb_entry, hlist);
-			if (f->dst == p && f->is_local) {
+			if (f->dst == p && f->is_local) {/* 如果表项的所属端口为p，并且其为本地表项，即目的地址为本机 */
 				/* maybe another port has same hw addr? */
 				struct net_bridge_port *op;
 				list_for_each_entry(op, &br->port_list, list) {
@@ -106,7 +108,7 @@ void br_fdb_changeaddr(struct net_bridge_port *p, const unsigned char *newaddr)
 
 	spin_unlock_bh(&br->hash_lock);
 }
-
+/* 清除网桥的动态的，老化时间到期的fdb信息 */
 void br_fdb_cleanup(unsigned long _data)
 {
 	struct net_bridge *br = (struct net_bridge *)_data;
@@ -129,7 +131,7 @@ void br_fdb_cleanup(unsigned long _data)
 	mod_timer(&br->gc_timer, jiffies + HZ/10);
 }
 
-
+/* 根据端口删除fdb表项，doall参数可以决定是否删除静态的表项 */
 void br_fdb_delete_by_port(struct net_bridge *br,
 			   const struct net_bridge_port *p,
 			   int do_all)
@@ -173,6 +175,7 @@ void br_fdb_delete_by_port(struct net_bridge *br,
 }
 
 /* No locking or refcounting, assumes caller has no preempt (rcu_read_lock) */
+/* 获取目的地址为addr的fdb表项，必须没有超时 */
 struct net_bridge_fdb_entry *__br_fdb_get(struct net_bridge *br,
 					  const unsigned char *addr)
 {
@@ -191,6 +194,7 @@ struct net_bridge_fdb_entry *__br_fdb_get(struct net_bridge *br,
 }
 
 /* Interface used by ATM hook that keeps a ref count */
+/* 获取表项，增加其引用计数 */
 struct net_bridge_fdb_entry *br_fdb_get(struct net_bridge *br, 
 					unsigned char *addr)
 {
@@ -203,7 +207,7 @@ struct net_bridge_fdb_entry *br_fdb_get(struct net_bridge *br,
 	rcu_read_unlock();
 	return fdb;
 }
-
+/* 表项的rcu删除 */
 static void fdb_rcu_free(struct rcu_head *head)
 {
 	struct net_bridge_fdb_entry *ent

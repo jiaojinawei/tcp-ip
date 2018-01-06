@@ -39,7 +39,7 @@ struct net_protocol {
 	int			(*gso_send_check)(struct sk_buff *skb);
 	struct sk_buff	       *(*gso_segment)(struct sk_buff *skb,
 					       int features);
-	int			no_policy;
+	int			no_policy;/* 判断是否需要进行策略处理，一般对于ipsec需要进行策略处理 */
 };
 
 #if defined(CONFIG_IPV6) || defined (CONFIG_IPV6_MODULE)

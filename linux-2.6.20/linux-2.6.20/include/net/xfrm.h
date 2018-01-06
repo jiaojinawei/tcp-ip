@@ -99,24 +99,24 @@ struct xfrm_state
 	struct hlist_node	byspi;
 
 	atomic_t		refcnt;
-	spinlock_t		lock;
+	spinlock_t		lock;/* 状态锁 */
 
-	struct xfrm_id		id;
+	struct xfrm_id		id;/* 状态id结构，即目的地址，SPI，协议三元组 */
 	struct xfrm_selector	sel;
 
 	u32			genid;
 
 	/* Key manger bits */
 	struct {
-		u8		state;
-		u8		dying;
+		u8		state;/* 该sa的状态，valid or invalid */
+		u8		dying;/* 可用时间 */
 		u32		seq;
 	} km;
 
 	/* Parameters of this state. */
 	struct {
-		u32		reqid;
-		u8		mode;
+		u32		reqid;/* 请求id */
+		u8		mode;/* 该sa通信商量后使用的传输模式 */
 		u8		replay_window;
 		u8		aalgo, ealgo, calgo;
 		u8		flags;
@@ -163,19 +163,19 @@ struct xfrm_state
 	/* Replay detection notification timer */
 	struct timer_list	rtimer;
 
-	/* Statistics */
+	/* Statistics 统计信息 */
 	struct xfrm_stats	stats;
 
 	struct xfrm_lifetime_cur curlft;
-	struct timer_list	timer;
+	struct timer_list	timer;/* 定时器 */
 
-	/* Last used time */
+	/* Last used time 最后使用时间 */
 	u64			lastused;
 
 	/* Reference to data common to all the instances of this
 	 * transformer. */
-	struct xfrm_type	*type;
-	struct xfrm_mode	*mode;
+	struct xfrm_type	*type; /* 使用的加密协议类型，这两个一般在报文输入时，记性解包是处理type，后处理mode */
+	struct xfrm_mode	*mode; /* 传输模式，传送模式还是隧道模式 */
 
 	/* Security context */
 	struct xfrm_sec_ctx	*security;
@@ -190,11 +190,11 @@ struct xfrm_state
 
 enum {
 	XFRM_STATE_VOID,
-	XFRM_STATE_ACQ,
-	XFRM_STATE_VALID,
+	XFRM_STATE_ACQ,/* 向用户态发送acq请求中 */
+	XFRM_STATE_VALID,/* 正常状态 */
 	XFRM_STATE_ERROR,
-	XFRM_STATE_EXPIRED,
-	XFRM_STATE_DEAD
+	XFRM_STATE_EXPIRED,/* 超时状态 */
+	XFRM_STATE_DEAD/* 已经消亡 */
 };
 
 /* callback structure passed from either netlink or pfkey */
@@ -333,29 +333,29 @@ struct xfrm_tmpl
 
 struct xfrm_policy
 {
-	struct xfrm_policy	*next;
-	struct hlist_node	bydst;
-	struct hlist_node	byidx;
+	struct xfrm_policy	*next;/* 指向下一个策略 */
+	struct hlist_node	bydst;/* 根据目的地址进行hash的hash表 */
+	struct hlist_node	byidx;/* 根据策略索引进行hash的hash表 */
 
 	/* This lock only affects elements except for entry. */
-	rwlock_t		lock;
-	atomic_t		refcnt;
-	struct timer_list	timer;
+	rwlock_t		lock;/* 策略保护锁 */
+	atomic_t		refcnt;/* 策略引用计数 */
+	struct timer_list	timer;/* 策略老化定时器 */
 
-	u32			priority;
-	u32			index;
-	struct xfrm_selector	selector;
-	struct xfrm_lifetime_cfg lft;
-	struct xfrm_lifetime_cur curlft;
-	struct dst_entry       *bundles;
-	u16			family;
-	u8			type;
-	u8			action;
-	u8			flags;
-	u8			dead;
-	u8			xfrm_nr;
+	u32			priority;/* 策略优先级 */
+	u32			index;/* 策略索引 */
+	struct xfrm_selector	selector;/* 策略匹配条件，即报文的关键字匹配，进行报文的分流 */
+	struct xfrm_lifetime_cfg lft;/*  */
+	struct xfrm_lifetime_cur curlft;/* 策略报文统计信息 */
+	struct dst_entry       *bundles;/* 策略的路由缓存 */
+	u16			family;/* 策略协议族 */
+	u8			type;/* ipsec类型 */
+	u8			action;/* 策略动作，命中后是放行还是丢弃 */
+	u8			flags;/* 策略标志 */
+	u8			dead;/* 策略是否可以释放 */
+	u8			xfrm_nr;/* 策略的xfrm_tmpl数组大小 */
 	/* XXX 1 byte hole, try to pack */
-	struct xfrm_sec_ctx	*security;
+	struct xfrm_sec_ctx	*security;/* 策略的安全上下文 */
 	struct xfrm_tmpl       	xfrm_vec[XFRM_MAX_DEPTH];
 };
 
@@ -659,17 +659,17 @@ xfrm_state_addr_cmp(struct xfrm_tmpl *tmpl, struct xfrm_state *x, unsigned short
 #ifdef CONFIG_XFRM
 
 extern int __xfrm_policy_check(struct sock *, int dir, struct sk_buff *skb, unsigned short family);
-
+/* 策略检查函数 */
 static inline int xfrm_policy_check(struct sock *sk, int dir, struct sk_buff *skb, unsigned short family)
 {
-	if (sk && sk->sk_policy[XFRM_POLICY_IN])
+	if (sk && sk->sk_policy[XFRM_POLICY_IN])/* 如果套接字被设置了安全策略选项，则检查入方向的策略 */
 		return __xfrm_policy_check(sk, dir, skb, family);
-
-	return	(!xfrm_policy_count[dir] && !skb->sp) ||
-		(skb->dst->flags & DST_NOPOLICY) ||
-		__xfrm_policy_check(sk, dir, skb, family);
+	/* 直接检查通用策略 */
+	return	(!xfrm_policy_count[dir] && !skb->sp) ||/* 如果该方向上没有策略并且报文没有被解封装，直接返回1 */
+		(skb->dst->flags & DST_NOPOLICY) ||/* 如果报文路由设置了DST_NOPOLICY，则直接返回1 */
+		__xfrm_policy_check(sk, dir, skb, family);/* 否则进行策略检查 */
 }
-
+/* ipv4策略检查函数*/
 static inline int xfrm4_policy_check(struct sock *sk, int dir, struct sk_buff *skb)
 {
 	return xfrm_policy_check(sk, dir, skb, AF_INET);
@@ -685,11 +685,11 @@ extern int __xfrm_route_forward(struct sk_buff *skb, unsigned short family);
 
 static inline int xfrm_route_forward(struct sk_buff *skb, unsigned short family)
 {
-	return	!xfrm_policy_count[XFRM_POLICY_OUT] ||
+	return	!xfrm_policy_count[XFRM_POLICY_OUT] ||/* 如果该方向上没有策略，并且该报文的目的路由缓存已经设置了DST_NOXFRM，则不进行路由查找 */
 		(skb->dst->flags & DST_NOXFRM) ||
-		__xfrm_route_forward(skb, family);
+		__xfrm_route_forward(skb, family);/* 进行路由查找 */
 }
-
+/* ipv4安全路由选择 */
 static inline int xfrm4_route_forward(struct sk_buff *skb)
 {
 	return xfrm_route_forward(skb, AF_INET);

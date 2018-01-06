@@ -160,7 +160,7 @@ static int esp_input(struct xfrm_state *x, struct sk_buff *skb)
 	int padlen;
 	int err;
 
-	if (!pskb_may_pull(skb, sizeof(struct ip_esp_hdr)))
+	if (!pskb_may_pull(skb, sizeof(struct ip_esp_hdr)))/* 查看报文的第一片段是否足够8个字节 */
 		goto out;
 
 	if (elen <= 0 || (elen & (blksize-1)))
@@ -170,14 +170,14 @@ static int esp_input(struct xfrm_state *x, struct sk_buff *skb)
 	if (esp->auth.icv_full_len) {
 		u8 sum[alen];
 
-		err = esp_mac_digest(esp, skb, 0, skb->len - alen);
+		err = esp_mac_digest(esp, skb, 0, skb->len - alen);/* 计算报文的摘要信息 */
 		if (err)
 			goto out;
 
 		if (skb_copy_bits(skb, skb->len - alen, sum, alen))
 			BUG();
 
-		if (unlikely(memcmp(esp->auth.work_icv, sum, alen))) {
+		if (unlikely(memcmp(esp->auth.work_icv, sum, alen))) {/* 比较认证值是否一致 */
 			x->stats.integrity_failed++;
 			goto out;
 		}
@@ -427,22 +427,23 @@ error:
 	return -EINVAL;
 }
 
+/* esp的协议结构 */
 static struct xfrm_type esp_type =
 {
-	.description	= "ESP4",
-	.owner		= THIS_MODULE,
-	.proto	     	= IPPROTO_ESP,
-	.init_state	= esp_init_state,
-	.destructor	= esp_destroy,
+	.description	= "ESP4",/* 描述字符串 */
+	.owner		= THIS_MODULE,/* 协议模块 */
+	.proto	     	= IPPROTO_ESP,/* 协议编号 */
+	.init_state	= esp_init_state,/* 初始化安全联盟 */
+	.destructor	= esp_destroy,/* 销毁安全联盟 */
 	.get_max_size	= esp4_get_max_size,
-	.input		= esp_input,
-	.output		= esp_output
+	.input		= esp_input,/* 输入处理函数 */
+	.output		= esp_output/* 输出处理函数 */
 };
 
 static struct net_protocol esp4_protocol = {
-	.handler	=	xfrm4_rcv,
-	.err_handler	=	esp4_err,
-	.no_policy	=	1,
+	.handler	=	xfrm4_rcv,/* esp4报文接收处理函数 */
+	.err_handler	=	esp4_err,/* esp错误处理函数 */
+	.no_policy	=	1,/* 标志存在安全策略 */
 };
 
 static int __init esp4_init(void)

@@ -54,12 +54,12 @@ static void xfrm_policy_unlock_afinfo(struct xfrm_policy_afinfo *afinfo);
 static inline int
 __xfrm4_selector_match(struct xfrm_selector *sel, struct flowi *fl)
 {
-	return  addr_match(&fl->fl4_dst, &sel->daddr, sel->prefixlen_d) &&
-		addr_match(&fl->fl4_src, &sel->saddr, sel->prefixlen_s) &&
-		!((xfrm_flowi_dport(fl) ^ sel->dport) & sel->dport_mask) &&
-		!((xfrm_flowi_sport(fl) ^ sel->sport) & sel->sport_mask) &&
-		(fl->proto == sel->proto || !sel->proto) &&
-		(fl->oif == sel->ifindex || !sel->ifindex);
+	return  addr_match(&fl->fl4_dst, &sel->daddr, sel->prefixlen_d) &&/* 目的端口必须一致 */
+		addr_match(&fl->fl4_src, &sel->saddr, sel->prefixlen_s) &&/* 源ip地址必须一致 */
+		!((xfrm_flowi_dport(fl) ^ sel->dport) & sel->dport_mask) &&/* 目的端口必须一致 */
+		!((xfrm_flowi_sport(fl) ^ sel->sport) & sel->sport_mask) &&/* 源端口必须一致 */
+		(fl->proto == sel->proto || !sel->proto) &&/* 指定了传输层协议，则传输层协议必须一致 */
+		(fl->oif == sel->ifindex || !sel->ifindex);/* 出接口如果存在，则必须一致 */
 }
 
 static inline int
@@ -72,7 +72,7 @@ __xfrm6_selector_match(struct xfrm_selector *sel, struct flowi *fl)
 		(fl->proto == sel->proto || !sel->proto) &&
 		(fl->oif == sel->ifindex || !sel->ifindex);
 }
-
+/* 选择子进行策略匹配 */
 int xfrm_selector_match(struct xfrm_selector *sel, struct flowi *fl,
 		    unsigned short family)
 {
@@ -410,6 +410,7 @@ static void xfrm_policy_gc_task(struct work_struct *work)
 
 /* Rule must be locked. Release descentant resources, announce
  * entry dead. The rule must be unlinked from lists to the moment.
+ * 将策略从链表中断开
  */
 
 static void xfrm_policy_kill(struct xfrm_policy *policy)
@@ -418,7 +419,7 @@ static void xfrm_policy_kill(struct xfrm_policy *policy)
 
 	write_lock_bh(&policy->lock);
 	dead = policy->dead;
-	policy->dead = 1;
+	policy->dead = 1;/* 设置策略的死亡标志 */
 	write_unlock_bh(&policy->lock);
 
 	if (unlikely(dead)) {
@@ -427,10 +428,10 @@ static void xfrm_policy_kill(struct xfrm_policy *policy)
 	}
 
 	spin_lock(&xfrm_policy_gc_lock);
-	hlist_add_head(&policy->bydst, &xfrm_policy_gc_list);
+	hlist_add_head(&policy->bydst, &xfrm_policy_gc_list);/* 将策略放入垃圾回收链表中 */
 	spin_unlock(&xfrm_policy_gc_lock);
 
-	schedule_work(&xfrm_policy_gc_work);
+	schedule_work(&xfrm_policy_gc_work);/* 调度垃圾回收工作线程 */
 }
 
 struct xfrm_policy_hash {
@@ -601,7 +602,9 @@ static void xfrm_hash_resize(struct work_struct *__unused)
 static DECLARE_WORK(xfrm_hash_work, xfrm_hash_resize);
 
 /* Generate new index... KAME seems to generate them ordered by cost
- * of an absolute inpredictability of ordering of rules. This will not pass. */
+ * of an absolute inpredictability of ordering of rules. This will not pass. 
+ * 产生一个新的索引
+ */
 static u32 xfrm_gen_index(u8 type, int dir)
 {
 	static u32 idx_generator;
@@ -919,24 +922,25 @@ EXPORT_SYMBOL(xfrm_policy_walk);
  * Find policy to apply to this flow.
  *
  * Returns 0 if policy found, else an -errno.
+ * 找到一个策略去匹配这条流
  */
 static int xfrm_policy_match(struct xfrm_policy *pol, struct flowi *fl,
 			     u8 type, u16 family, int dir)
 {
-	struct xfrm_selector *sel = &pol->selector;
+	struct xfrm_selector *sel = &pol->selector;/* 获取选择子 */
 	int match, ret = -ESRCH;
 
-	if (pol->family != family ||
+	if (pol->family != family ||/* 安全协议和协议族必须一样 */
 	    pol->type != type)
 		return ret;
-
+	/* 进一步使用选择子进行匹配，匹配成功则返回1 */
 	match = xfrm_selector_match(sel, fl, family);
-	if (match)
+	if (match)/* 匹配成功则返回1 */
 		ret = security_xfrm_policy_lookup(pol, fl->secid, dir);
 
 	return ret;
 }
-
+/* 根据协议类型进行策略查找 */
 static struct xfrm_policy *xfrm_policy_lookup_bytype(u8 type, struct flowi *fl,
 						     u16 family, u8 dir)
 {
@@ -947,16 +951,16 @@ static struct xfrm_policy *xfrm_policy_lookup_bytype(u8 type, struct flowi *fl,
 	struct hlist_head *chain;
 	u32 priority = ~0U;
 
-	daddr = xfrm_flowi_daddr(fl, family);
-	saddr = xfrm_flowi_saddr(fl, family);
+	daddr = xfrm_flowi_daddr(fl, family);/* 获取报文目的地址 */
+	saddr = xfrm_flowi_saddr(fl, family);/* 获取报文源地址 */
 	if (unlikely(!daddr || !saddr))
 		return NULL;
 
-	read_lock_bh(&xfrm_policy_lock);
-	chain = policy_hash_direct(daddr, saddr, family, dir);
+	read_lock_bh(&xfrm_policy_lock);/* 获取策略锁 */
+	chain = policy_hash_direct(daddr, saddr, family, dir);/* 获取策略的链表  */
 	ret = NULL;
-	hlist_for_each_entry(pol, entry, chain, bydst) {
-		err = xfrm_policy_match(pol, fl, type, family, dir);
+	hlist_for_each_entry(pol, entry, chain, bydst) {/* 遍历每一个策略 */
+		err = xfrm_policy_match(pol, fl, type, family, dir);/* 查看策略是否匹配 */
 		if (err) {
 			if (err == -ESRCH)
 				continue;
@@ -1020,7 +1024,7 @@ end:
 		*obj_refp = &pol->refcnt;
 	return err;
 }
-
+/* 将xfrm类型转化为流的方向 */
 static inline int policy_to_flow_dir(int dir)
 {
 	if (XFRM_POLICY_IN == FLOW_DIR_IN &&
@@ -1037,18 +1041,18 @@ static inline int policy_to_flow_dir(int dir)
  		return FLOW_DIR_FWD;
 	};
 }
-
+/* 套接字选项策略查找 */
 static struct xfrm_policy *xfrm_sk_policy_lookup(struct sock *sk, int dir, struct flowi *fl)
 {
 	struct xfrm_policy *pol;
 
 	read_lock_bh(&xfrm_policy_lock);
-	if ((pol = sk->sk_policy[dir]) != NULL) {
+	if ((pol = sk->sk_policy[dir]) != NULL) {/* 对该方向上的选择子进行匹配 */
  		int match = xfrm_selector_match(&pol->selector, fl,
 						sk->sk_family);
  		int err = 0;
 
-		if (match) {
+		if (match) {/* 匹配成功 */
 			err = security_xfrm_policy_lookup(pol, fl->secid,
 					policy_to_flow_dir(dir));
 			if (!err)
@@ -1063,7 +1067,7 @@ static struct xfrm_policy *xfrm_sk_policy_lookup(struct sock *sk, int dir, struc
 	read_unlock_bh(&xfrm_policy_lock);
 	return pol;
 }
-
+/* 将策略加入选择子hash表中 */
 static void __xfrm_policy_link(struct xfrm_policy *pol, int dir)
 {
 	struct hlist_head *chain = policy_hash_bysel(&pol->selector,
@@ -1106,21 +1110,22 @@ int xfrm_policy_delete(struct xfrm_policy *pol, int dir)
 }
 EXPORT_SYMBOL(xfrm_policy_delete);
 
+/* 为套接字添加ipsec策略*/
 int xfrm_sk_policy_insert(struct sock *sk, int dir, struct xfrm_policy *pol)
 {
 	struct xfrm_policy *old_pol;
 
-#ifdef CONFIG_XFRM_SUB_POLICY
+#ifdef CONFIG_XFRM_SUB_POLICY/* 如果是子策略，直接返回错误，套接字不支持子策略 */
 	if (pol && pol->type != XFRM_POLICY_TYPE_MAIN)
 		return -EINVAL;
 #endif
 
-	write_lock_bh(&xfrm_policy_lock);
-	old_pol = sk->sk_policy[dir];
-	sk->sk_policy[dir] = pol;
+	write_lock_bh(&xfrm_policy_lock);/* 获取策略锁 */
+	old_pol = sk->sk_policy[dir];/* 获取套接字本方向上的策略 */
+	sk->sk_policy[dir] = pol;/* 替换掉 */
 	if (pol) {
-		pol->curlft.add_time = (unsigned long)xtime.tv_sec;
-		pol->index = xfrm_gen_index(pol->type, XFRM_POLICY_MAX+dir);
+		pol->curlft.add_time = (unsigned long)xtime.tv_sec;/* 设置添加的时间 */
+		pol->index = xfrm_gen_index(pol->type, XFRM_POLICY_MAX+dir);/* 给策略分配索引 */
 		__xfrm_policy_link(pol, XFRM_POLICY_MAX+dir);
 	}
 	if (old_pol)
@@ -1188,7 +1193,7 @@ xfrm_get_saddr(xfrm_address_t *local, xfrm_address_t *remote,
 }
 
 /* Resolve list of templates for the flow, given policy. */
-
+/* 为该流根据指定策略分解一串魔板，生成其对应的sa */
 static int
 xfrm_tmpl_resolve_one(struct xfrm_policy *policy, struct flowi *fl,
 		      struct xfrm_state **xfrm,
@@ -1196,28 +1201,28 @@ xfrm_tmpl_resolve_one(struct xfrm_policy *policy, struct flowi *fl,
 {
 	int nx;
 	int i, error;
-	xfrm_address_t *daddr = xfrm_flowi_daddr(fl, family);
-	xfrm_address_t *saddr = xfrm_flowi_saddr(fl, family);
+	xfrm_address_t *daddr = xfrm_flowi_daddr(fl, family);/* 获取报文目的ip */
+	xfrm_address_t *saddr = xfrm_flowi_saddr(fl, family);/* 获取报文的源ip */
 	xfrm_address_t tmp;
 
-	for (nx=0, i = 0; i < policy->xfrm_nr; i++) {
+	for (nx=0, i = 0; i < policy->xfrm_nr; i++) {/* 遍历每一个模板 */
 		struct xfrm_state *x;
-		xfrm_address_t *remote = daddr;
+		xfrm_address_t *remote = daddr;/*  */
 		xfrm_address_t *local  = saddr;
-		struct xfrm_tmpl *tmpl = &policy->xfrm_vec[i];
-
-		if (tmpl->mode == XFRM_MODE_TUNNEL) {
-			remote = &tmpl->id.daddr;
+		struct xfrm_tmpl *tmpl = &policy->xfrm_vec[i];/* 指向当前的模板*/
+		/* 隧道模式下解决外层ip头的源目的地址的问题 */
+		if (tmpl->mode == XFRM_MODE_TUNNEL) {/* 模板是否是隧道模式 */
+			remote = &tmpl->id.daddr;/* 隧道模式下，使用模板中的源目的ip作为外层头的源目的ip */
 			local = &tmpl->saddr;
 			family = tmpl->encap_family;
-			if (xfrm_addr_any(local, family)) {
+			if (xfrm_addr_any(local, family)) {/* 如果模板中没有指定具体的源地址，则通过查找路由获取源地址 */
 				error = xfrm_get_saddr(&tmp, remote, family);
 				if (error)
 					goto fail;
 				local = &tmp;
 			}
 		}
-
+		/* 根据源目的ip，协议族，策略，模板，查找sa */
 		x = xfrm_state_find(remote, local, fl, tmpl, policy, &error, family);
 
 		if (x && x->km.state == XFRM_STATE_VALID) {
@@ -1255,6 +1260,7 @@ xfrm_tmpl_resolve(struct xfrm_policy **pols, int npols, struct flowi *fl,
 	int ret;
 	int i;
 
+	/* 对每一个策略的模板进行sa处理 */
 	for (i = 0; i < npols; i++) {
 		if (cnx + pols[i]->xfrm_nr >= XFRM_MAX_DEPTH) {
 			error = -ENOBUFS;
@@ -1300,6 +1306,7 @@ xfrm_find_bundle(struct flowi *fl, struct xfrm_policy *policy, unsigned short fa
 
 /* Allocate chain of dst_entry's, attach known xfrm's, calculate
  * all the metrics... Shortly, bundle a bundle.
+ * 创建一个路由系列
  */
 
 static int
@@ -1308,11 +1315,11 @@ xfrm_bundle_create(struct xfrm_policy *policy, struct xfrm_state **xfrm, int nx,
 		   unsigned short family)
 {
 	int err;
-	struct xfrm_policy_afinfo *afinfo = xfrm_policy_get_afinfo(family);
+	struct xfrm_policy_afinfo *afinfo = xfrm_policy_get_afinfo(family);/* 获取该协议族的ipsec控制块 */
 	if (unlikely(afinfo == NULL))
 		return -EINVAL;
-	err = afinfo->bundle_create(policy, xfrm, nx, fl, dst_p);
-	xfrm_policy_put_afinfo(afinfo);
+	err = afinfo->bundle_create(policy, xfrm, nx, fl, dst_p);/* 调用协议族自己的实现 */
+	xfrm_policy_put_afinfo(afinfo);/* 减小其引用计数 */
 	return err;
 }
 
@@ -1323,6 +1330,7 @@ static int stale_bundle(struct dst_entry *dst);
  *
  * At the moment we eat a raw IP route. Mostly to speed up lookups
  * on interfaces with disabled IPsec.
+ * 主要功能P:为给定的流查找一个路由(bundle)
  */
 int xfrm_lookup(struct dst_entry **dst_p, struct flowi *fl,
 		struct sock *sk, int flags)
@@ -1339,7 +1347,7 @@ int xfrm_lookup(struct dst_entry **dst_p, struct flowi *fl,
 	int err;
 	u32 genid;
 	u16 family;
-	u8 dir = policy_to_flow_dir(XFRM_POLICY_OUT);
+	u8 dir = policy_to_flow_dir(XFRM_POLICY_OUT);/* 将xfrm的方向转换为流的方向 */
 
 restart:
 	genid = atomic_read(&flow_cache_genid);
@@ -1356,10 +1364,11 @@ restart:
 			return PTR_ERR(policy);
 	}
 
+	/* 没有找到 */
 	if (!policy) {
 		/* To accelerate a bit...  */
 		if ((dst_orig->flags & DST_NOXFRM) ||
-		    !xfrm_policy_count[XFRM_POLICY_OUT])
+		    !xfrm_policy_count[XFRM_POLICY_OUT])/* 该方向没有xfrm策略 */
 			return 0;
 
 		policy = flow_cache_lookup(fl, dst_orig->ops->family,
@@ -1367,15 +1376,16 @@ restart:
 		if (IS_ERR(policy))
 			return PTR_ERR(policy);
 	}
+	/* 上面先进行策略的查找，没有找到的话，直接返回0 */
 
 	if (!policy)
 		return 0;
 
 	family = dst_orig->ops->family;
-	policy->curlft.use_time = (unsigned long)xtime.tv_sec;
-	pols[0] = policy;
+	policy->curlft.use_time = (unsigned long)xtime.tv_sec;/* 跟新策略最后使用时间 */
+	pols[0] = policy;/* 主策略 */
 	npols ++;
-	xfrm_nr += pols[0]->xfrm_nr;
+	xfrm_nr += pols[0]->xfrm_nr; /* 需要进行多少次嵌套安全实施 */
 
 	switch (policy->action) {
 	case XFRM_POLICY_BLOCK:
@@ -1475,6 +1485,7 @@ restart:
 		}
 
 		dst = dst_orig;
+		/* 为每一个sa查找路由 */
 		err = xfrm_bundle_create(policy, xfrm, nx, fl, &dst, family);
 
 		if (unlikely(err)) {
@@ -1484,7 +1495,7 @@ restart:
 			goto error;
 		}
 
-		for (pi = 0; pi < npols; pi++) {
+		for (pi = 0; pi < npols; pi++) {/* 一般只有一个策略 */
 			read_lock_bh(&pols[pi]->lock);
 			pol_dead |= pols[pi]->dead;
 			read_unlock_bh(&pols[pi]->lock);
@@ -1618,12 +1629,12 @@ static inline int secpath_has_nontransport(struct sec_path *sp, int k, int *idxp
 
 	return 0;
 }
-
+/* 安全策略检查 */
 int __xfrm_policy_check(struct sock *sk, int dir, struct sk_buff *skb, 
 			unsigned short family)
 {
 	struct xfrm_policy *pol;
-	struct xfrm_policy *pols[XFRM_POLICY_TYPE_MAX];
+	struct xfrm_policy *pols[XFRM_POLICY_TYPE_MAX];/* 一共有两个策略，一个是子策略，一个是主策略 */
 	int npols = 0;
 	int xfrm_nr;
 	int pi;
@@ -1631,49 +1642,50 @@ int __xfrm_policy_check(struct sock *sk, int dir, struct sk_buff *skb,
 	u8 fl_dir = policy_to_flow_dir(dir);
 	int xerr_idx = -1;
 
-	if (xfrm_decode_session(skb, &fl, family) < 0)
+	if (xfrm_decode_session(skb, &fl, family) < 0)/* 报文解析，获取其fl */
 		return 0;
 	nf_nat_decode_session(skb, &fl, family);
 
 	/* First, check used SA against their selectors. */
+	/* 报文已经解析过了其sa，进行sa与选择子校验 */
 	if (skb->sp) {
 		int i;
 
-		for (i=skb->sp->len-1; i>=0; i--) {
+		for (i=skb->sp->len-1; i>=0; i--) {/* 遍历每一个sa */
 			struct xfrm_state *x = skb->sp->xvec[i];
-			if (!xfrm_selector_match(&x->sel, &fl, family))
+			if (!xfrm_selector_match(&x->sel, &fl, family))/* 进行选择子匹配，相等返回1，不相等返回0 */
 				return 0;
 		}
 	}
 
 	pol = NULL;
-	if (sk && sk->sk_policy[dir]) {
+	if (sk && sk->sk_policy[dir]) {/* 如果存在套接字策略选项， */
 		pol = xfrm_sk_policy_lookup(sk, dir, &fl);
 		if (IS_ERR(pol))
 			return 0;
 	}
 
-	if (!pol)
+	if (!pol)/* 还没有找到策略，进行路由查找，根据路由查看该流是否需要进行安全策略 */
 		pol = flow_cache_lookup(&fl, family, fl_dir,
 					xfrm_policy_lookup);
 
 	if (IS_ERR(pol))
 		return 0;
 
-	if (!pol) {
+	if (!pol) {/* 如果没有找到策略 */
 		if (skb->sp && secpath_has_nontransport(skb->sp, 0, &xerr_idx)) {
 			xfrm_secpath_reject(xerr_idx, skb, &fl);
 			return 0;
 		}
-		return 1;
+		return 1;/* 普通包，直接返回1 */
 	}
 
-	pol->curlft.use_time = (unsigned long)xtime.tv_sec;
+	pol->curlft.use_time = (unsigned long)xtime.tv_sec;/* 更新当前生命信息 */
 
-	pols[0] = pol;
+	pols[0] = pol;/* 主策略指向找到的策略 */
 	npols ++;
 #ifdef CONFIG_XFRM_SUB_POLICY
-	if (pols[0]->type != XFRM_POLICY_TYPE_MAIN) {
+	if (pols[0]->type != XFRM_POLICY_TYPE_MAIN) {/* 查找子策略 */
 		pols[1] = xfrm_policy_lookup_bytype(XFRM_POLICY_TYPE_MAIN,
 						    &fl, family,
 						    XFRM_POLICY_IN);
@@ -1686,7 +1698,7 @@ int __xfrm_policy_check(struct sock *sk, int dir, struct sk_buff *skb,
 	}
 #endif
 
-	if (pol->action == XFRM_POLICY_ALLOW) {
+	if (pol->action == XFRM_POLICY_ALLOW) {/* 主策略动作为放行 */
 		struct sec_path *sp;
 		static struct sec_path dummy;
 		struct xfrm_tmpl *tp[XFRM_MAX_DEPTH];
@@ -1747,10 +1759,10 @@ EXPORT_SYMBOL(__xfrm_policy_check);
 int __xfrm_route_forward(struct sk_buff *skb, unsigned short family)
 {
 	struct flowi fl;
-
+	/* 解析fl */
 	if (xfrm_decode_session(skb, &fl, family) < 0)
 		return 0;
-
+	/* 查找路由 */
 	return xfrm_lookup(&skb->dst, &fl, NULL, 0) == 0;
 }
 EXPORT_SYMBOL(__xfrm_route_forward);

@@ -15,7 +15,7 @@
 #include <linux/netfilter_ipv4.h>
 #include <net/ip.h>
 #include <net/xfrm.h>
-
+/* ipv4的ipsec报文处理函数，作为ah和esp协议数据报的接收处理函数 */
 int xfrm4_rcv(struct sk_buff *skb)
 {
 	return xfrm4_rcv_encap(skb, 0);
@@ -23,8 +23,11 @@ int xfrm4_rcv(struct sk_buff *skb)
 
 EXPORT_SYMBOL(xfrm4_rcv);
 
-static int xfrm4_parse_spi(struct sk_buff *skb, u8 nexthdr, __be32 *spi, __be32 *seq)
+static int xfrm4_parse_spi(struct sk_buff *skb,/* 输入的报文 */ 
+	                             u8 nexthdr, /* 头类型，即ip头的protocol字段 */
+	                             __be32 *spi, /* 将要返回你的spi值 */
 {
+	__be32 *seq)/* 将要返回的seq值 */
 	switch (nexthdr) {
 	case IPPROTO_IPIP:
 		*spi = skb->nh.iph->saddr;
@@ -61,6 +64,7 @@ int xfrm4_rcv_encap(struct sk_buff *skb, __u16 encap_type)
 	int xfrm_nr = 0;
 	int decaps = 0;
 
+	/* 解析报文中的spi和seq信息 */
 	if ((err = xfrm4_parse_spi(skb, skb->nh.iph->protocol, &spi, &seq)) != 0)
 		goto drop;
 
@@ -69,25 +73,25 @@ int xfrm4_rcv_encap(struct sk_buff *skb, __u16 encap_type)
 
 		if (xfrm_nr == XFRM_MAX_DEPTH)
 			goto drop;
-
+		/* 查找sa，如果没有找到的话，直接丢弃该报文，因为一般是发送方进行sa的协商的，所以收到报文这方应该是存在对应的sa的 */
 		x = xfrm_state_lookup((xfrm_address_t *)&iph->daddr, spi, iph->protocol, AF_INET);
-		if (x == NULL)
+		if (x == NULL)/* 如果没有找到对应的sa的话，丢球该报文 */
 			goto drop;
 
-		spin_lock(&x->lock);
+		spin_lock(&x->lock);/* 获取安全联盟锁 */
 		if (unlikely(x->km.state != XFRM_STATE_VALID))
 			goto drop_unlock;
 
-		if ((x->encap ? x->encap->encap_type : 0) != encap_type)
+		if ((x->encap ? x->encap->encap_type : 0) != encap_type)/* 判断报文中的封装与sa中指定的封装是否一致 */
 			goto drop_unlock;
-
+		/* 进行重放处理 */
 		if (x->props.replay_window && xfrm_replay_check(x, seq))
 			goto drop_unlock;
-
+		/* 检查sa是否超时 */
 		if (xfrm_state_check_expire(x))
 			goto drop_unlock;
-
-		if (x->type->input(x, skb))
+		/* 进行解密处理 */
+		if (x->type->input(x, skb))/*  */
 			goto drop_unlock;
 
 		/* only the first xfrm gets the encap type */
@@ -96,21 +100,21 @@ int xfrm4_rcv_encap(struct sk_buff *skb, __u16 encap_type)
 		if (x->props.replay_window)
 			xfrm_replay_advance(x, seq);
 
-		x->curlft.bytes += skb->len;
-		x->curlft.packets++;
+		x->curlft.bytes += skb->len;/* 统计字节 */
+		x->curlft.packets++;/* 统计包 */
 
-		spin_unlock(&x->lock);
+		spin_unlock(&x->lock);/* 解锁 */
 
-		xfrm_vec[xfrm_nr++] = x;
+		xfrm_vec[xfrm_nr++] = x;/* 记录本层的sa */
 
-		if (x->mode->input(x, skb))
+		if (x->mode->input(x, skb))/* 进行隧道重构 */
 			goto drop;
 
 		if (x->props.mode == XFRM_MODE_TUNNEL) {
 			decaps = 1;
 			break;
 		}
-
+		/* 支持嵌套模式 */
 		if ((err = xfrm_parse_spi(skb, skb->nh.iph->protocol, &spi, &seq)) < 0)
 			goto drop;
 	} while (!err);

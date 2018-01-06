@@ -46,7 +46,7 @@ struct dst_entry
 	short			obsolete;
 	int			flags;
 #define DST_HOST		1
-#define DST_NOXFRM		2
+#define DST_NOXFRM		2/* 不进行ipsec操作 */
 #define DST_NOPOLICY		4
 #define DST_NOHASH		8
 #define DST_BALANCED            0x10

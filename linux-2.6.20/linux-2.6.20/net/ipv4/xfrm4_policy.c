@@ -20,7 +20,7 @@ static int xfrm4_dst_lookup(struct xfrm_dst **dst, struct flowi *fl)
 {
 	return __ip_route_output_key((struct rtable**)dst, fl);
 }
-
+/* 通过查找路由获取源地址 */
 static int xfrm4_get_saddr(xfrm_address_t *saddr, xfrm_address_t *daddr)
 {
 	struct rtable *rt;
@@ -31,7 +31,7 @@ static int xfrm4_get_saddr(xfrm_address_t *saddr, xfrm_address_t *daddr)
 			},
 		},
 	};
-
+	/* 查找路由 */
 	if (!xfrm4_dst_lookup((struct xfrm_dst **)&rt, &fl_tunnel)) {
 		saddr->a4 = rt->rt_src;
 		dst_release(&rt->u.dst);
@@ -63,6 +63,7 @@ __xfrm4_find_bundle(struct flowi *fl, struct xfrm_policy *policy)
 
 /* Allocate chain of dst_entry's, attach known xfrm's, calculate
  * all the metrics... Shortly, bundle a bundle.
+ * 分配一个dst_entry链表，然后将其依附在xfrm上，计算所有路由参数
  */
 
 static int
@@ -74,7 +75,7 @@ __xfrm4_bundle_create(struct xfrm_policy *policy, struct xfrm_state **xfrm, int 
 	struct rtable *rt = rt0;
 	__be32 remote = fl->fl4_dst;
 	__be32 local  = fl->fl4_src;
-	struct flowi fl_tunnel = {
+	struct flowi fl_tunnel = {/* 构建路由查找关键字 */
 		.nl_u = {
 			.ip4_u = {
 				.saddr = local,
@@ -91,8 +92,8 @@ __xfrm4_bundle_create(struct xfrm_policy *policy, struct xfrm_state **xfrm, int 
 	dst = dst_prev = NULL;
 	dst_hold(&rt->u.dst);
 
-	for (i = 0; i < nx; i++) {
-		struct dst_entry *dst1 = dst_alloc(&xfrm4_dst_ops);
+	for (i = 0; i < nx; i++) {/* 遍历每一个sa */
+		struct dst_entry *dst1 = dst_alloc(&xfrm4_dst_ops);/* 分配一个dst_entry */
 		struct xfrm_dst *xdst;
 		int tunnel = 0;
 
@@ -102,31 +103,32 @@ __xfrm4_bundle_create(struct xfrm_policy *policy, struct xfrm_state **xfrm, int 
 			goto error;
 		}
 
-		if (!dst)
+		if (!dst)/* 如果是第一个dst，则将该dst1赋值给dst */
 			dst = dst1;
 		else {
-			dst_prev->child = dst1;
+			dst_prev->child = dst1;/* 否则插入到尾部 */
 			dst1->flags |= DST_NOHASH;
-			dst_clone(dst1);
+			dst_clone(dst1);/* 增加引用计数 */
 		}
 
 		xdst = (struct xfrm_dst *)dst1;
-		xdst->route = &rt->u.dst;
+		xdst->route = &rt->u.dst;/* 指向路由缓存 */
 		xdst->genid = xfrm[i]->genid;
 
 		dst1->next = dst_prev;
 		dst_prev = dst1;
-		if (xfrm[i]->props.mode != XFRM_MODE_TRANSPORT) {
-			remote = xfrm[i]->id.daddr.a4;
-			local  = xfrm[i]->props.saddr.a4;
-			tunnel = 1;
+		if (xfrm[i]->props.mode != XFRM_MODE_TRANSPORT) {/* 非传送模式 */
+			remote = xfrm[i]->id.daddr.a4;/* 获取外层ip头中的目的地址 */
+			local  = xfrm[i]->props.saddr.a4;/* 获取外层ip头的源地址 */
+			tunnel = 1;/* 表示隧道模式 */
 		}
-		header_len += xfrm[i]->props.header_len;
-		trailer_len += xfrm[i]->props.trailer_len;
+		header_len += xfrm[i]->props.header_len;/* 累计添加的头长度 */
+		trailer_len += xfrm[i]->props.trailer_len;/* 累计添加的尾部长度 */
 
-		if (tunnel) {
+		if (tunnel) {/* 隧道模式，更新隧道查找路由参数 */
 			fl_tunnel.fl4_src = local;
 			fl_tunnel.fl4_dst = remote;
+			/* 查找本层隧道的安全策略路由 */
 			err = xfrm_dst_lookup((struct xfrm_dst **)&rt,
 					      &fl_tunnel, AF_INET);
 			if (err)

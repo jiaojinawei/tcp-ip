@@ -18,18 +18,19 @@
 #define BPDU_TYPE_CONFIG 0
 #define BPDU_TYPE_TCN 0x80
 
+/* 生成树协议数据报 */
 struct br_config_bpdu
 {
-	unsigned	topology_change:1;
-	unsigned	topology_change_ack:1;
-	bridge_id	root;
-	int		root_path_cost;
-	bridge_id	bridge_id;
-	port_id		port_id;
-	int		message_age;
-	int		max_age;
-	int		hello_time;
-	int		forward_delay;
+	unsigned	topology_change:1;/* top改变标识 */
+	unsigned	topology_change_ack:1;/* top改变会赢标识 */
+	bridge_id	root;/* 根网桥id，用于汇聚后的网桥网络中，所有配置BPDU中的该字段应该具有相同值(同vlan中)，该值分为网桥优先级和mac地址组合 */
+	int		root_path_cost;/* 通往根网桥的所有链路的累积开销 */
+	bridge_id	bridge_id;/* 创建当前BPDU的网桥id */
+	port_id		port_id;/* 发送端口id  */
+	int		message_age;/* 记录根网桥生成当前的BPDU起源信息所消耗的时间 */
+	int		max_age;/* 保存BPDU配置信息的最长时间，也反映了top变化通知过程中的网桥表的生存时间情况 */
+	int		hello_time;/* 心跳时间 */
+	int		forward_delay;/* 用于在listening和learning状态的时间，也反映了拓扑变化通知过程中的时间情况 */
 };
 
 /* called under bridge lock */
