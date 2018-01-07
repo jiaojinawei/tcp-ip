@@ -45,11 +45,13 @@ static atomic_t pfkey_socks_nr = ATOMIC_INIT(0);
 
 struct pfkey_sock {
 	/* struct sock must be the first member of struct pfkey_sock */
+    /* 所有套接字的公共成员 */
 	struct sock	sk;
-	int		registered;
-	int		promisc;
+	/* pf_key多了两个成员 */
+	int		registered;/* 是否进行登记 */
+	int		promisc;/* 是否混杂模式 */
 };
-
+/* 对sock进行强制类型转换成pfkey_sock */
 static inline struct pfkey_sock *pfkey_sk(struct sock *sk)
 {
 	return (struct pfkey_sock *)sk;
@@ -135,33 +137,34 @@ static struct proto key_proto = {
 	.owner	  = THIS_MODULE,
 	.obj_size = sizeof(struct pfkey_sock),
 };
-
+/* 套接口层创建套接口时，根据类型调用该函数，创建pfkey套接口 */
 static int pfkey_create(struct socket *sock, int protocol)
 {
 	struct sock *sk;
 	int err;
 
-	if (!capable(CAP_NET_ADMIN))
+	if (!capable(CAP_NET_ADMIN))/* 只有管理权限才有资格 */
 		return -EPERM;
-	if (sock->type != SOCK_RAW)
+	if (sock->type != SOCK_RAW)/* 只支持原始套接字 */
 		return -ESOCKTNOSUPPORT;
-	if (protocol != PF_KEY_V2)
+	if (protocol != PF_KEY_V2)/* 只支持版本2 */
 		return -EPROTONOSUPPORT;
 
 	err = -ENOMEM;
+	/* 分配套接口缓存 */
 	sk = sk_alloc(PF_KEY, GFP_KERNEL, &key_proto, 1);
 	if (sk == NULL)
 		goto out;
-	
+	/* 套接口操作函数 */
 	sock->ops = &pfkey_ops;
-	sock_init_data(sock, sk);
+	sock_init_data(sock, sk);/* 初始化套接口的相关参数 */
 
 	sk->sk_family = PF_KEY;
-	sk->sk_destruct = pfkey_sock_destruct;
+	sk->sk_destruct = pfkey_sock_destruct;/* 套接口销毁函数 */
 
 	atomic_inc(&pfkey_socks_nr);
 
-	pfkey_insert(sk);
+	pfkey_insert(sk);/* 将新创建的pfkey套接口插入hash表 */
 
 	return 0;
 out:
@@ -2474,7 +2477,7 @@ static pfkey_handler pfkey_funcs[SADB_MAX + 1] = {
 	[SADB_X_SPDSETIDX]	= pfkey_spdadd,
 	[SADB_X_SPDDELETE2]	= pfkey_spdget,
 };
-
+/* 消息处理函数 */
 static int pfkey_process(struct sock *sk, struct sk_buff *skb, struct sadb_msg *hdr)
 {
 	void *ext_hdrs[SADB_EXT_MAX];
@@ -2484,7 +2487,7 @@ static int pfkey_process(struct sock *sk, struct sk_buff *skb, struct sadb_msg *
 			BROADCAST_PROMISC_ONLY, NULL);
 
 	memset(ext_hdrs, 0, sizeof(ext_hdrs));
-	err = parse_exthdrs(skb, hdr, ext_hdrs);
+	err = parse_exthdrs(skb, hdr, ext_hdrs);/* 解析消息 */
 	if (!err) {
 		err = -EOPNOTSUPP;
 		if (pfkey_funcs[hdr->sadb_msg_type])

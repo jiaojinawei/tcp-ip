@@ -147,8 +147,8 @@ psched_tod_diff(int delta_sec, int bound)
 
 #define PSCHED_TDIFF_SAFE(tv1, tv2, bound) \
 ({ \
-	   int __delta_sec = (tv1).tv_sec - (tv2).tv_sec; \
-	   int __delta = (tv1).tv_usec - (tv2).tv_usec; \
+	   int __delta_sec = (tv1).tv_sec - (tv2).tv_sec; \/* 秒差值 */
+	   int __delta = (tv1).tv_usec - (tv2).tv_usec; \/* 微秒差值 */
 	   switch (__delta_sec) { \
 	   default: \
 		   __delta = psched_tod_diff(__delta_sec, bound);  break; \

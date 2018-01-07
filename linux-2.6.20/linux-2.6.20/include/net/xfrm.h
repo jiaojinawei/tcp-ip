@@ -375,6 +375,7 @@ struct xfrm_policy
 /* default seq threshold size */
 #define XFRM_AE_SEQT_SIZE		2
 
+/* 内核xfrm与用户态交互结构体，用于用户态管理内核态  */
 struct xfrm_mgr
 {
 	struct list_head	list;

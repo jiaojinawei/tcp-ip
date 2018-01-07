@@ -353,7 +353,7 @@ dev_graft_qdisc(struct net_device *dev, struct Qdisc *qdisc)
 
 	return oqdisc;
 }
-
+/* 规程树报文的队列减掉n */
 void qdisc_tree_decrease_qlen(struct Qdisc *sch, unsigned int n)
 {
 	struct Qdisc_class_ops *cops;
@@ -362,15 +362,15 @@ void qdisc_tree_decrease_qlen(struct Qdisc *sch, unsigned int n)
 
 	if (n == 0)
 		return;
-	while ((parentid = sch->parent)) {
-		sch = __qdisc_lookup(sch->dev, TC_H_MAJ(parentid));
-		cops = sch->ops->cl_ops;
+	while ((parentid = sch->parent)) {/* 获取其父调度的id */
+		sch = __qdisc_lookup(sch->dev, TC_H_MAJ(parentid));/* 根据父队列掩码进行规程查找 */
+		cops = sch->ops->cl_ops;/* 查看父规程是否存在类 */
 		if (cops->qlen_notify) {
 			cl = cops->get(sch, parentid);
 			cops->qlen_notify(sch, cl);
 			cops->put(sch, cl);
 		}
-		sch->q.qlen -= n;
+		sch->q.qlen -= n;/* 父规程减掉n，直到顶层规程退出 */
 	}
 }
 EXPORT_SYMBOL(qdisc_tree_decrease_qlen);

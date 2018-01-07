@@ -20,8 +20,8 @@ enum {
  */
 struct gnet_stats_basic
 {
-	__u64	bytes;
-	__u32	packets;
+	__u64	bytes;/* 总共处理的字节数，与backlog不同，backlog表示积压的字节数 */
+	__u32	packets;/* 总共处理的报文数 */
 };
 
 /**
@@ -45,11 +45,11 @@ struct gnet_stats_rate_est
  */
 struct gnet_stats_queue
 {
-	__u32	qlen;
-	__u32	backlog;
-	__u32	drops;
-	__u32	requeues;
-	__u32	overlimits;
+	__u32	qlen;/* 当前队列报文数 */
+	__u32	backlog;/* 当前队列的字节数，积压的报文个数 */
+	__u32	drops;/* 丢弃的报文个数 */
+	__u32	requeues;/* 重入队列统计(出队后发送不成功，只能重入队列尾部) */
+	__u32	overlimits;/* 队列中报文的个数超过限制的次数 */
 };
 
 /**

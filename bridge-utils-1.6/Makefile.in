@@ -1,0 +1,32 @@
+
+DESTDIR=
+KERNEL_HEADERS=-I@KERNEL_HEADERS@
+
+INSTALL=@INSTALL@
+
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+bindir=@bindir@
+sbindir=@sbindir@
+mandir=@mandir@
+distdir = $(PACKAGE)-$(VERSION)
+
+SUBDIRS=libbridge brctl doc
+
+all:
+	for x in $(SUBDIRS); do $(MAKE) $(MFLAGS) -C $$x || exit 1 ; done
+
+clean:
+	for x in $(SUBDIRS); do $(MAKE) $(MFLAGS) -C $$x clean ; done
+
+distclean:	clean
+	rm -f config.* 
+
+maintainer-clean: distclean
+	rm -f configure Makefile bridge-utils.spec
+	rm -fr autom4te.cache
+	rm -f brctl/Makefile libbridge/Makefile doc/Makefile
+
+install:
+	for x in $(SUBDIRS); do $(MAKE) $(MFLAGS) -C $$x install || exit 1 ; done
+

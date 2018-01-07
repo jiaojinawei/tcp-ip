@@ -14,44 +14,44 @@ struct Qdisc_ops;
 struct qdisc_walker;
 struct tcf_walker;
 struct module;
-
+/* 队列速率统计描述控制块 */
 struct qdisc_rate_table
 {
 	struct tc_ratespec rate;
 	u32		data[256];
 	struct qdisc_rate_table *next;
-	int		refcnt;
+	int		refcnt;/* 引用计数 */
 };
 
 struct Qdisc
 {
-	int 			(*enqueue)(struct sk_buff *skb, struct Qdisc *dev);
-	struct sk_buff *	(*dequeue)(struct Qdisc *dev);
+	int 			(*enqueue)(struct sk_buff *skb, struct Qdisc *dev);/* 入队函数 */
+	struct sk_buff *	(*dequeue)(struct Qdisc *dev);/* 出队函数 */
 	unsigned		flags;
 #define TCQ_F_BUILTIN	1
-#define TCQ_F_THROTTLED	2
+#define TCQ_F_THROTTLED	2/* 扼杀，表明已经超过了限制，不在收包 */
 #define TCQ_F_INGRESS	4
-	int			padded;
-	struct Qdisc_ops	*ops;
-	u32			handle;
-	u32			parent;
-	atomic_t		refcnt;
-	struct sk_buff_head	q;
-	struct net_device	*dev;
-	struct list_head	list;
+	int			padded;/* 填充字节数 */
+	struct Qdisc_ops	*ops;/* 队列操作函数 */
+	u32			handle;/* 规程句柄((parent)&TC_H_MAJ_MASK) */
+	u32			parent;/* 与上面句柄一起使用，用于查找父规程 */
+	atomic_t		refcnt;/* 引用计数 */
+	struct sk_buff_head	q;/* 报文队列 */
+	struct net_device	*dev;/* 队列所属设备 */
+	struct list_head	list;/* 将所有队列穿起来 */
 
-	struct gnet_stats_basic	bstats;
-	struct gnet_stats_queue	qstats;
-	struct gnet_stats_rate_est	rate_est;
-	spinlock_t		*stats_lock;
-	struct rcu_head 	q_rcu;
+	struct gnet_stats_basic	bstats;/* 网络统计 */
+	struct gnet_stats_queue	qstats;/* 队列统计 */
+	struct gnet_stats_rate_est	rate_est;/* 速率评估 */
+	spinlock_t		*stats_lock;/* 统计信息锁 */
+	struct rcu_head 	q_rcu;/* 该规程的rcu保护结构体 */
 	int			(*reshape_fail)(struct sk_buff *skb,
-					struct Qdisc *q);
+					struct Qdisc *q);/* 整形 */
 
 	/* This field is deprecated, but it is still used by CBQ
 	 * and it will live until better solution will be invented.
 	 */
-	struct Qdisc		*__parent;
+	struct Qdisc		*__parent;/* 父规则 */
 };
 
 struct Qdisc_class_ops
@@ -85,10 +85,10 @@ struct Qdisc_class_ops
 
 struct Qdisc_ops
 {
-	struct Qdisc_ops	*next;
-	struct Qdisc_class_ops	*cl_ops;
+	struct Qdisc_ops	*next;/* 所有规程操作结构体链入到一个链表中 */
+	struct Qdisc_class_ops	*cl_ops;/* 规程操作的类，规程如果不是一个最后的队列的话，需要操作该类 */
 	char			id[IFNAMSIZ];
-	int			priv_size;
+	int			priv_size;/* 规程中私有信息的大小 */
 
 	int 			(*enqueue)(struct sk_buff *, struct Qdisc *);
 	struct sk_buff *	(*dequeue)(struct Qdisc *);
@@ -208,7 +208,7 @@ static inline struct sk_buff *__qdisc_dequeue_head(struct Qdisc *sch,
 	struct sk_buff *skb = __skb_dequeue(list);
 
 	if (likely(skb != NULL))
-		sch->qstats.backlog -= skb->len;
+		sch->qstats.backlog -= skb->len;/* 减去 */
 
 	return skb;
 }
@@ -239,7 +239,7 @@ static inline int __qdisc_requeue(struct sk_buff *skb, struct Qdisc *sch,
 {
 	__skb_queue_head(list, skb);
 	sch->qstats.backlog += skb->len;
-	sch->qstats.requeues++;
+	sch->qstats.requeues++;/* 重入队列统计 */
 
 	return NET_XMIT_SUCCESS;
 }
@@ -255,6 +255,7 @@ static inline void __qdisc_reset_queue(struct Qdisc *sch,
 	/*
 	 * We do not know the backlog in bytes of this list, it
 	 * is up to the caller to correct it
+	 * 清空队列的所有报文并将其删除释放其内存
 	 */
 	skb_queue_purge(list);
 }
@@ -264,7 +265,7 @@ static inline void qdisc_reset_queue(struct Qdisc *sch)
 	__qdisc_reset_queue(sch, &sch->q);
 	sch->qstats.backlog = 0;
 }
-
+/* 出队报文丢弃 */
 static inline unsigned int __qdisc_queue_drop(struct Qdisc *sch,
 					      struct sk_buff_head *list)
 {

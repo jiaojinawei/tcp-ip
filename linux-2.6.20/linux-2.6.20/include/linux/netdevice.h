@@ -237,11 +237,11 @@ struct hh_cache
 
 enum netdev_state_t
 {
-	__LINK_STATE_XOFF=0,
-	__LINK_STATE_START,
-	__LINK_STATE_PRESENT,
+	__LINK_STATE_XOFF=0,/* 设备报文队列关闭，禁止报文入队 */
+	__LINK_STATE_START,/* 设备已经启动 */
+	__LINK_STATE_PRESENT,/* 设备存在 */
 	__LINK_STATE_SCHED,
-	__LINK_STATE_NOCARRIER,
+	__LINK_STATE_NOCARRIER,/* 设备掉电 */
 	__LINK_STATE_RX_SCHED,
 	__LINK_STATE_LINKWATCH_PENDING,
 	__LINK_STATE_DORMANT,
@@ -418,12 +418,12 @@ struct net_device
 /*
  * Cache line mostly used on queue transmit path (qdisc)
  */
-	/* device queue lock */
-	spinlock_t		queue_lock ____cacheline_aligned_in_smp;
-	struct Qdisc		*qdisc;
-	struct Qdisc		*qdisc_sleeping;
-	struct list_head	qdisc_list;
-	unsigned long		tx_queue_len;	/* Max frames per queue allowed */
+	/* device queue lock qos相关字段 */
+	spinlock_t		queue_lock ____cacheline_aligned_in_smp;/* 队列锁 */
+	struct Qdisc		*qdisc;/* 规程 */
+	struct Qdisc		*qdisc_sleeping;/* 这两个值一般是一样的。tx_queue_len这个值为0时表示不整形 */
+	struct list_head	qdisc_list;/* 规程链表 */
+	unsigned long		tx_queue_len;	/* Max frames per queue allowed 队列允许的最大报文个数，其为0时表示不整形 */
 
 	/* Partially transmitted GSO packet. */
 	struct sk_buff		*gso_skb;

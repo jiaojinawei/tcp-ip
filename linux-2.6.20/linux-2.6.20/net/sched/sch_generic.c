@@ -198,16 +198,16 @@ static void dev_watchdog(unsigned long arg)
 	struct net_device *dev = (struct net_device *)arg;
 
 	netif_tx_lock(dev);
-	if (dev->qdisc != &noop_qdisc) {
-		if (netif_device_present(dev) &&
+	if (dev->qdisc != &noop_qdisc) {/* 如果不是空规程 */
+		if (netif_device_present(dev) &&/* 如果存在该设备，且该设备正在运行，并且上电了 */
 		    netif_running(dev) &&
 		    netif_carrier_ok(dev)) {
-			if (netif_queue_stopped(dev) &&
-			    time_after(jiffies, dev->trans_start + dev->watchdog_timeo)) {
+			if (netif_queue_stopped(dev) &&/* 设备已经停止入队 */
+			    time_after(jiffies, dev->trans_start + dev->watchdog_timeo)) {/* 已经超时 */
 
 				printk(KERN_INFO "NETDEV WATCHDOG: %s: transmit timed out\n",
 				       dev->name);
-				dev->tx_timeout(dev);
+				dev->tx_timeout(dev);/* 调用设备超时函数 */
 			}
 			if (!mod_timer(&dev->watchdog_timer, jiffies + dev->watchdog_timeo))
 				dev_hold(dev);
@@ -227,14 +227,14 @@ static void dev_watchdog_init(struct net_device *dev)
 
 void __netdev_watchdog_up(struct net_device *dev)
 {
-	if (dev->tx_timeout) {
+	if (dev->tx_timeout) {/* 设备超时函数不为空 */
 		if (dev->watchdog_timeo <= 0)
-			dev->watchdog_timeo = 5*HZ;
+			dev->watchdog_timeo = 5*HZ;/* 设置5秒超时时间 */
 		if (!mod_timer(&dev->watchdog_timer, jiffies + dev->watchdog_timeo))
 			dev_hold(dev);
 	}
 }
-
+/* 整形看门狗定时器 */
 static void dev_watchdog_up(struct net_device *dev)
 {
 	__netdev_watchdog_up(dev);
@@ -250,12 +250,12 @@ static void dev_watchdog_down(struct net_device *dev)
 
 void netif_carrier_on(struct net_device *dev)
 {
-	if (test_and_clear_bit(__LINK_STATE_NOCARRIER, &dev->state))
+	if (test_and_clear_bit(__LINK_STATE_NOCARRIER, &dev->state))/* 清除设备的__LINK_STATE_NOCARRIER标志 */
 		linkwatch_fire_event(dev);
 	if (netif_running(dev))
-		__netdev_watchdog_up(dev);
+		__netdev_watchdog_up(dev);/* 开启定时器 */
 }
-
+/* 关闭设备，并且设置其标志位__LINK_STATE_NOCARRIER */
 void netif_carrier_off(struct net_device *dev)
 {
 	if (!test_and_set_bit(__LINK_STATE_NOCARRIER, &dev->state))
@@ -286,7 +286,7 @@ static int noop_requeue(struct sk_buff *skb, struct Qdisc* qdisc)
 	kfree_skb(skb);
 	return NET_XMIT_CN;
 }
-
+/* 空队列规程操作函数 */
 struct Qdisc_ops noop_qdisc_ops = {
 	.id		=	"noop",
 	.priv_size	=	0,
@@ -295,7 +295,7 @@ struct Qdisc_ops noop_qdisc_ops = {
 	.requeue	=	noop_requeue,
 	.owner		=	THIS_MODULE,
 };
-
+/* 空队列规程 */
 struct Qdisc noop_qdisc = {
 	.enqueue	=	noop_enqueue,
 	.dequeue	=	noop_dequeue,
@@ -307,17 +307,17 @@ struct Qdisc noop_qdisc = {
 static struct Qdisc_ops noqueue_qdisc_ops = {
 	.id		=	"noqueue",
 	.priv_size	=	0,
-	.enqueue	=	noop_enqueue,
-	.dequeue	=	noop_dequeue,
-	.requeue	=	noop_requeue,
+	.enqueue	=	noop_enqueue,/* 入队即释放报文 */
+	.dequeue	=	noop_dequeue,/* 出队返回空 */
+	.requeue	=	noop_requeue,/* 重入队也是释放 */
 	.owner		=	THIS_MODULE,
 };
 
 static struct Qdisc noqueue_qdisc = {
-	.enqueue	=	NULL,
+	.enqueue	=	NULL,/* 入队为空，使用该判断是否启用规程 */
 	.dequeue	=	noop_dequeue,
-	.flags		=	TCQ_F_BUILTIN,
-	.ops		=	&noqueue_qdisc_ops,
+	.flags		=	TCQ_F_BUILTIN,/* 直接返回空 */
+	.ops		=	&noqueue_qdisc_ops,/* 规程操作函数 */
 	.list		=	LIST_HEAD_INIT(noqueue_qdisc.list),
 };
 
@@ -382,7 +382,7 @@ static void pfifo_fast_reset(struct Qdisc* qdisc)
 	qdisc->qstats.backlog = 0;
 	qdisc->q.qlen = 0;
 }
-
+/* 打印队列优先级 */
 static int pfifo_fast_dump(struct Qdisc *qdisc, struct sk_buff *skb)
 {
 	struct tc_prio_qopt opt = { .bands = PFIFO_FAST_BANDS };
@@ -394,7 +394,7 @@ static int pfifo_fast_dump(struct Qdisc *qdisc, struct sk_buff *skb)
 rtattr_failure:
 	return -1;
 }
-
+/* 队列初始化 */
 static int pfifo_fast_init(struct Qdisc *qdisc, struct rtattr *opt)
 {
 	int prio;
@@ -405,19 +405,19 @@ static int pfifo_fast_init(struct Qdisc *qdisc, struct rtattr *opt)
 
 	return 0;
 }
-
+/* fifo规程操作函数 */
 static struct Qdisc_ops pfifo_fast_ops = {
 	.id		=	"pfifo_fast",
-	.priv_size	=	PFIFO_FAST_BANDS * sizeof(struct sk_buff_head),
-	.enqueue	=	pfifo_fast_enqueue,
-	.dequeue	=	pfifo_fast_dequeue,
-	.requeue	=	pfifo_fast_requeue,
-	.init		=	pfifo_fast_init,
-	.reset		=	pfifo_fast_reset,
-	.dump		=	pfifo_fast_dump,
+	.priv_size	=	PFIFO_FAST_BANDS * sizeof(struct sk_buff_head),/* fifo队列的私有信息内存大小，即3个优先级队列大小 */
+	.enqueue	=	pfifo_fast_enqueue,/* 入队 */
+	.dequeue	=	pfifo_fast_dequeue,/* 出队 */
+	.requeue	=	pfifo_fast_requeue,/* 重入队 */
+	.init		=	pfifo_fast_init,/* 队列初始化 */
+	.reset		=	pfifo_fast_reset,/* 队列复位 */
+	.dump		=	pfifo_fast_dump,/* 队列信息获取 */
 	.owner		=	THIS_MODULE,
 };
-
+/* 规程分配函数 */
 struct Qdisc *qdisc_alloc(struct net_device *dev, struct Qdisc_ops *ops)
 {
 	void *p;
@@ -427,17 +427,17 @@ struct Qdisc *qdisc_alloc(struct net_device *dev, struct Qdisc_ops *ops)
 
 	/* ensure that the Qdisc and the private data are 32-byte aligned */
 	size = QDISC_ALIGN(sizeof(*sch));
-	size += ops->priv_size + (QDISC_ALIGNTO - 1);
+	size += ops->priv_size + (QDISC_ALIGNTO - 1);/* 计算规程占用的内存大小 */
 
-	p = kzalloc(size, GFP_KERNEL);
+	p = kzalloc(size, GFP_KERNEL);/* 分配内存 */
 	if (!p)
 		goto errout;
-	sch = (struct Qdisc *) QDISC_ALIGN((unsigned long) p);
-	sch->padded = (char *) sch - (char *) p;
+	sch = (struct Qdisc *) QDISC_ALIGN((unsigned long) p);/* 规程起始地址按照32字节对齐 */
+	sch->padded = (char *) sch - (char *) p;/* 计算规程前面填充的字节数 */
 
-	INIT_LIST_HEAD(&sch->list);
-	skb_queue_head_init(&sch->q);
-	sch->ops = ops;
+	INIT_LIST_HEAD(&sch->list);/* 初始化规程链表 */
+	skb_queue_head_init(&sch->q);/* 初始化规程的队列 */
+	sch->ops = ops;/* 指向规程的操作函数 */
 	sch->enqueue = ops->enqueue;
 	sch->dequeue = ops->dequeue;
 	sch->dev = dev;
@@ -449,21 +449,21 @@ struct Qdisc *qdisc_alloc(struct net_device *dev, struct Qdisc_ops *ops)
 errout:
 	return ERR_PTR(-err);
 }
-
+/* 创建一个数据过滤规程 */
 struct Qdisc * qdisc_create_dflt(struct net_device *dev, struct Qdisc_ops *ops,
 				 unsigned int parentid)
 {
 	struct Qdisc *sch;
 	
-	sch = qdisc_alloc(dev, ops);
+	sch = qdisc_alloc(dev, ops);/* 分配一个规程控制块 */
 	if (IS_ERR(sch))
 		goto errout;
-	sch->parent = parentid;
+	sch->parent = parentid;/* 指向其父id */
 
-	if (!ops->init || ops->init(sch, NULL) == 0)
+	if (!ops->init || ops->init(sch, NULL) == 0)/* 调用规程操作函数进行规程初始化 */
 		return sch;
 
-	qdisc_destroy(sch);
+	qdisc_destroy(sch);/* 失败的话直接删除销毁规程 */
 errout:
 	return NULL;
 }
@@ -488,29 +488,29 @@ static void __qdisc_destroy(struct rcu_head *head)
 }
 
 /* Under dev->queue_lock and BH! */
-
+/* 规程销毁函数 */
 void qdisc_destroy(struct Qdisc *qdisc)
 {
-	struct Qdisc_ops  *ops = qdisc->ops;
+	struct Qdisc_ops  *ops = qdisc->ops;/* 获取规程操作函数结构体 */
 
 	if (qdisc->flags & TCQ_F_BUILTIN ||
 	    !atomic_dec_and_test(&qdisc->refcnt))
 		return;
 
-	list_del(&qdisc->list);
+	list_del(&qdisc->list);/* 从规程链表中删除 */
 #ifdef CONFIG_NET_ESTIMATOR
 	gen_kill_estimator(&qdisc->bstats, &qdisc->rate_est);
 #endif
-	if (ops->reset)
+	if (ops->reset)/* 复位规程 */
 		ops->reset(qdisc);
-	if (ops->destroy)
+	if (ops->destroy)/* 销毁规程 */
 		ops->destroy(qdisc);
 
-	module_put(ops->owner);
-	dev_put(qdisc->dev);
-	call_rcu(&qdisc->q_rcu, __qdisc_destroy);
+	module_put(ops->owner);/* 减小模块引用计数 */
+	dev_put(qdisc->dev);/* 减小规程设备的引用计数 */
+	call_rcu(&qdisc->q_rcu, __qdisc_destroy);/* 调用rcu销毁规程资源 */
 }
-
+/* 设备激活 */
 void dev_activate(struct net_device *dev)
 {
 	/* No queueing discipline is attached to device;
@@ -519,9 +519,9 @@ void dev_activate(struct net_device *dev)
 	   virtual interfaces
 	 */
 
-	if (dev->qdisc_sleeping == &noop_qdisc) {
+	if (dev->qdisc_sleeping == &noop_qdisc) {/* 如果其规程是初始化状态的话，则创建一个fifo规程 */
 		struct Qdisc *qdisc;
-		if (dev->tx_queue_len) {
+		if (dev->tx_queue_len) {/* 如果设备设置了队列上限，则建立fifo规程 */
 			qdisc = qdisc_create_dflt(dev, &pfifo_fast_ops,
 						  TC_H_ROOT);
 			if (qdisc == NULL) {
@@ -531,43 +531,43 @@ void dev_activate(struct net_device *dev)
 			write_lock(&qdisc_tree_lock);
 			list_add_tail(&qdisc->list, &dev->qdisc_list);
 			write_unlock(&qdisc_tree_lock);
-		} else {
+		} else {/* 否则建立非队列规程，直接发送 */
 			qdisc =  &noqueue_qdisc;
 		}
 		write_lock(&qdisc_tree_lock);
-		dev->qdisc_sleeping = qdisc;
+		dev->qdisc_sleeping = qdisc;/* 这里表明不进行整形 */
 		write_unlock(&qdisc_tree_lock);
 	}
 
-	if (!netif_carrier_ok(dev))
+	if (!netif_carrier_ok(dev))/* 如果设备没有up，直接返回 */
 		/* Delay activation until next carrier-on event */
 		return;
 
 	spin_lock_bh(&dev->queue_lock);
 	rcu_assign_pointer(dev->qdisc, dev->qdisc_sleeping);
-	if (dev->qdisc != &noqueue_qdisc) {
+	if (dev->qdisc != &noqueue_qdisc) {/* 存在整形，记录传输时间，开启定时器 */
 		dev->trans_start = jiffies;
 		dev_watchdog_up(dev);
 	}
 	spin_unlock_bh(&dev->queue_lock);
 }
-
+/* 设备去激活 */
 void dev_deactivate(struct net_device *dev)
 {
 	struct Qdisc *qdisc;
 
-	spin_lock_bh(&dev->queue_lock);
-	qdisc = dev->qdisc;
-	dev->qdisc = &noop_qdisc;
+	spin_lock_bh(&dev->queue_lock);/* 获取设备队列锁 */
+	qdisc = dev->qdisc;/* 获取其qos规程 */
+	dev->qdisc = &noop_qdisc;/* 设置其规程为空队列规程 */
 
-	qdisc_reset(qdisc);
+	qdisc_reset(qdisc);/* 复位队列规程 */
 
-	spin_unlock_bh(&dev->queue_lock);
+	spin_unlock_bh(&dev->queue_lock);/* 释放队列规程锁 */
 
-	dev_watchdog_down(dev);
+	dev_watchdog_down(dev);/* 关闭定时器 */
 
 	/* Wait for outstanding dev_queue_xmit calls. */
-	synchronize_rcu();
+	synchronize_rcu();/* 等待rcu删除 */
 
 	/* Wait for outstanding qdisc_run calls. */
 	while (test_bit(__LINK_STATE_QDISC_RUNNING, &dev->state))
@@ -578,7 +578,7 @@ void dev_deactivate(struct net_device *dev)
 		dev->gso_skb = NULL;
 	}
 }
-
+/* 初始化设备规程 */
 void dev_init_scheduler(struct net_device *dev)
 {
 	qdisc_lock_tree(dev);

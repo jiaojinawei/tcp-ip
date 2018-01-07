@@ -112,34 +112,34 @@
 	It is passed to the default bfifo qdisc - if the inner qdisc is
 	changed the limit is not effective anymore.
 */
-
+/* 令牌桶队列的私有数据 */
 struct tbf_sched_data
 {
 /* Parameters */
-	u32		limit;		/* Maximal length of backlog: bytes */
-	u32		buffer;		/* Token bucket depth/rate: MUST BE >= MTU/B */
-	u32		mtu;
-	u32		max_size;
-	struct qdisc_rate_table	*R_tab;
+	u32		limit;		/* Maximal length of backlog: bytes 最大允许积压的字节数 */
+	u32		buffer;		/* Token bucket depth/rate: MUST BE >= MTU/B 桶中最大允许的字节令牌个数，与tokens对应 */
+	u32		mtu;		/* 桶中允许的最大包令牌数与ptokens对应 */
+	u32		max_size;   /* 单个报文最大字节值 */
+	struct qdisc_rate_table	*R_tab;/* 字节速率限制 */
 	struct qdisc_rate_table	*P_tab;
 
 /* Variables */
-	long	tokens;			/* Current number of B tokens */
-	long	ptokens;		/* Current number of P tokens */
+	long	tokens;			/* Current number of B tokens 当前字节令牌数目 */
+	long	ptokens;		/* Current number of P tokens 当前报文令牌数目 */
 	psched_time_t	t_c;		/* Time check-point */
-	struct timer_list wd_timer;	/* Watchdog timer */
-	struct Qdisc	*qdisc;		/* Inner qdisc, default - bfifo queue */
+	struct timer_list wd_timer;	/* Watchdog timer 看门狗定时器 */
+	struct Qdisc	*qdisc;		/* Inner qdisc, default - bfifo queue 其所属规程，默认使用bfifo规程 */
 };
 
-#define L2T(q,L)   ((q)->R_tab->data[(L)>>(q)->R_tab->rate.cell_log])
-#define L2T_P(q,L) ((q)->P_tab->data[(L)>>(q)->P_tab->rate.cell_log])
-
+#define L2T(q,L)   ((q)->R_tab->data[(L)>>(q)->R_tab->rate.cell_log])/* 将报文长度转化为需要的字节令牌数 */
+#define L2T_P(q,L) ((q)->P_tab->data[(L)>>(q)->P_tab->rate.cell_log])/* 将报文长度转化为需要的包令牌数 */
+/* 令牌桶过滤入队列 */
 static int tbf_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 {
 	struct tbf_sched_data *q = qdisc_priv(sch);
 	int ret;
 
-	if (skb->len > q->max_size) {
+	if (skb->len > q->max_size) {/* 如果报文过长的话，直接丢弃报文 */
 		sch->qstats.drops++;
 #ifdef CONFIG_NET_CLS_POLICE
 		if (sch->reshape_fail == NULL || sch->reshape_fail(skb, sch))
@@ -154,25 +154,25 @@ static int tbf_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 		return ret;
 	}
 
-	sch->q.qlen++;
-	sch->bstats.bytes += skb->len;
-	sch->bstats.packets++;
+	sch->q.qlen++;/* 队列中长度加加 */
+	sch->bstats.bytes += skb->len;/* 字节加加 */
+	sch->bstats.packets++;/* 报文处理个数加加 */
 	return 0;
 }
-
+/* 令牌桶重入队列 */
 static int tbf_requeue(struct sk_buff *skb, struct Qdisc* sch)
 {
 	struct tbf_sched_data *q = qdisc_priv(sch);
 	int ret;
 
-	if ((ret = q->qdisc->ops->requeue(skb, q->qdisc)) == 0) {
-		sch->q.qlen++;
+	if ((ret = q->qdisc->ops->requeue(skb, q->qdisc)) == 0) {/* 进行重入队 */
+		sch->q.qlen++;/* 入队统计 */
 		sch->qstats.requeues++;
 	}
 
 	return ret;
 }
-
+/* 报文丢弃函数 */
 static unsigned int tbf_drop(struct Qdisc* sch)
 {
 	struct tbf_sched_data *q = qdisc_priv(sch);
@@ -192,55 +192,59 @@ static void tbf_watchdog(unsigned long arg)
 	sch->flags &= ~TCQ_F_THROTTLED;
 	netif_schedule(sch->dev);
 }
-
+/* 出队函数 */
 static struct sk_buff *tbf_dequeue(struct Qdisc* sch)
 {
 	struct tbf_sched_data *q = qdisc_priv(sch);
 	struct sk_buff *skb;
 
-	skb = q->qdisc->dequeue(q->qdisc);
+	skb = q->qdisc->dequeue(q->qdisc);/* 从队列中取包 */
 
-	if (skb) {
+	if (skb) {/* 发送报文 */
 		psched_time_t now;
 		long toks, delay;
 		long ptoks = 0;
 		unsigned int len = skb->len;
 
-		PSCHED_GET_TIME(now);
+		PSCHED_GET_TIME(now);/* 获取当前时间，将其转化为秒 */
 
-		toks = PSCHED_TDIFF_SAFE(now, q->t_c, q->buffer);
+		toks = PSCHED_TDIFF_SAFE(now, q->t_c, q->buffer);/* 计算需要增加的令牌数目 */
 
-		if (q->P_tab) {
-			ptoks = toks + q->ptokens;
-			if (ptoks > (long)q->mtu)
+		if (q->P_tab) {/* 处理包令牌 */
+			ptoks = toks + q->ptokens;/* 计算总的令牌数 */
+			if (ptoks > (long)q->mtu)/* 如果大于桶中的可以存在的上限，则设置为桶的上限 */
 				ptoks = q->mtu;
-			ptoks -= L2T_P(q, len);
+			ptoks -= L2T_P(q, len);/* 将报文长度转化为需要的包令牌数，从总数中减掉 */
 		}
+
+		/* 处理字节令牌 */
 		toks += q->tokens;
 		if (toks > (long)q->buffer)
 			toks = q->buffer;
-		toks -= L2T(q, len);
+		toks -= L2T(q, len);/* 将报文长度转化为需要的字节令牌数，从总数中减掉 */
 
-		if ((toks|ptoks) >= 0) {
-			q->t_c = now;
-			q->tokens = toks;
-			q->ptokens = ptoks;
-			sch->q.qlen--;
-			sch->flags &= ~TCQ_F_THROTTLED;
+		if ((toks|ptoks) >= 0) {/* 报文限速或者字节限速只要有一个没有超过则认为是可以通过 */
+			q->t_c = now;/* 更新发送时间 */
+			q->tokens = toks;/* 记录新的字节令牌个数 */
+			q->ptokens = ptoks;/* 记录新的报文令牌个数 */
+			sch->q.qlen--;/* 队列长度减掉1 */
+			sch->flags &= ~TCQ_F_THROTTLED;/* 去掉扼杀标志 */
 			return skb;
 		}
-
-		delay = PSCHED_US2JIFFIE(max_t(long, -toks, -ptoks));
+		
+		delay = PSCHED_US2JIFFIE(max_t(long, -toks, -ptoks));/* 将微秒转化成jiffies */
 
 		if (delay == 0)
 			delay = 1;
 
-		mod_timer(&q->wd_timer, jiffies+delay);
+		mod_timer(&q->wd_timer, jiffies+delay);/* 设置延迟定时器 */
 
 		/* Maybe we have a shorter packet in the queue,
 		   which can be sent now. It sounds cool,
 		   but, however, this is wrong in principle.
 		   We MUST NOT reorder packets under these circumstances.
+
+		   可能在某种环境下有一个短包可以发送出去，听起来很棒，但是某些情况下可能会坏事，因为我们改变了报文的顺序。
 
 		   Really, if we split the flow into independent
 		   subflows, it would be a very good solution.
@@ -248,14 +252,14 @@ static struct sk_buff *tbf_dequeue(struct Qdisc* sch)
 		   (cf. CSZ, HPFQ, HFSC)
 		 */
 
-		if (q->qdisc->ops->requeue(skb, q->qdisc) != NET_XMIT_SUCCESS) {
+		if (q->qdisc->ops->requeue(skb, q->qdisc) != NET_XMIT_SUCCESS) {/* 入队，如果入队不成功，减小队列长度 */
 			/* When requeue fails skb is dropped */
-			qdisc_tree_decrease_qlen(q->qdisc, 1);
-			sch->qstats.drops++;
+			qdisc_tree_decrease_qlen(q->qdisc, 1);/* 规程树递归减掉1，主要是祖先规程，本规程已经减掉了1 */
+			sch->qstats.drops++;/* 增加失败统计 */
 		}
 
-		sch->flags |= TCQ_F_THROTTLED;
-		sch->qstats.overlimits++;
+		sch->flags |= TCQ_F_THROTTLED;/* 设置扼杀标志，表明队列已经满了，不在收包 */
+		sch->qstats.overlimits++;/* 溢出统计加加 */
 	}
 	return NULL;
 }
@@ -264,21 +268,21 @@ static void tbf_reset(struct Qdisc* sch)
 {
 	struct tbf_sched_data *q = qdisc_priv(sch);
 
-	qdisc_reset(q->qdisc);
-	sch->q.qlen = 0;
-	PSCHED_GET_TIME(q->t_c);
-	q->tokens = q->buffer;
-	q->ptokens = q->mtu;
-	sch->flags &= ~TCQ_F_THROTTLED;
-	del_timer(&q->wd_timer);
+	qdisc_reset(q->qdisc);/* 复位规程 */
+	sch->q.qlen = 0;/* 报文个数为0 */
+	PSCHED_GET_TIME(q->t_c);/* 初始化时间为当前时间 */
+	q->tokens = q->buffer;/* 还原字节令牌数 */
+	q->ptokens = q->mtu;/* 还原包令牌数 */
+	sch->flags &= ~TCQ_F_THROTTLED;/* 可以收包 */
+	del_timer(&q->wd_timer);/* 删除定时器 */
 }
-
+/* 为主规程sch创建一个tbf子规程 */
 static struct Qdisc *tbf_create_dflt_qdisc(struct Qdisc *sch, u32 limit)
 {
 	struct Qdisc *q;
         struct rtattr *rta;
 	int ret;
-
+	/* 分配一个tbf规程，默认规程的操作函数为bfifo_qdisc_ops */
 	q = qdisc_create_dflt(sch->dev, &bfifo_qdisc_ops,
 			      TC_H_MAKE(sch->handle, 1));
 	if (q) {
@@ -299,7 +303,7 @@ static struct Qdisc *tbf_create_dflt_qdisc(struct Qdisc *sch, u32 limit)
 
 	return NULL;
 }
-
+/* 创建一个tbf规程 */
 static int tbf_change(struct Qdisc* sch, struct rtattr *opt)
 {
 	int err = -EINVAL;
@@ -369,17 +373,17 @@ done:
 		qdisc_put_rtab(ptab);
 	return err;
 }
-
+/* 令牌桶过滤初始化函数 */
 static int tbf_init(struct Qdisc* sch, struct rtattr *opt)
 {
-	struct tbf_sched_data *q = qdisc_priv(sch);
+	struct tbf_sched_data *q = qdisc_priv(sch);/* 获取令牌桶的私有数据 */
 
 	if (opt == NULL)
 		return -EINVAL;
 
 	PSCHED_GET_TIME(q->t_c);
-	init_timer(&q->wd_timer);
-	q->wd_timer.function = tbf_watchdog;
+	init_timer(&q->wd_timer);/* 初始化看门狗定时器 */
+	q->wd_timer.function = tbf_watchdog;/* 看门狗超时函数 */
 	q->wd_timer.data = (unsigned long)sch;
 
 	q->qdisc = &noop_qdisc;
